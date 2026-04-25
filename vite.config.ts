@@ -10,6 +10,7 @@ export default defineConfig({
         manualChunks: {
           charts: ['recharts'],
           table: ['@tanstack/react-table'],
+          spreadsheet: ['read-excel-file/universal', 'write-excel-file/universal'],
         },
       },
     },
