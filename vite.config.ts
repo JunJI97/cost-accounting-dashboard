@@ -11,6 +11,8 @@ export default defineConfig({
           charts: ['recharts'],
           table: ['@tanstack/react-table'],
           spreadsheet: ['read-excel-file/universal', 'write-excel-file/universal'],
+          pdfCapture: ['html2canvas'],
+          pdfWriter: ['jspdf'],
         },
       },
     },

@@ -180,6 +180,7 @@ export function DataEditor({ dataset }: DataEditorProps) {
     return {
       date: entry.date,
       employeeNo: employee?.employeeNo,
+      empName: employee?.name,
       projectCode: project?.projectCode,
       hours: entry.hours,
       manMonth: entry.hours / 160,
@@ -397,12 +398,13 @@ export function DataEditor({ dataset }: DataEditorProps) {
                   M/M 기준: 1 M/M = 160시간
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="min-w-[820px] w-full border-collapse text-sm">
+                  <table className="min-w-[880px] w-full border-collapse text-sm">
                     <thead>
                       <tr className="bg-slate-100 text-left text-slate-600">
                         <Header>NO</Header>
                         <Header sortKey="date" table="daily" sortState={sortState} onSort={requestSort}>일자</Header>
                         <Header sortKey="employeeNo" table="daily" sortState={sortState} onSort={requestSort}>사번</Header>
+                        <Header sortKey="empName" table="daily" sortState={sortState} onSort={requestSort}>이름</Header>
                         <Header sortKey="projectCode" table="daily" sortState={sortState} onSort={requestSort}>프로젝트코드</Header>
                         <Header sortKey="hours" table="daily" sortState={sortState} onSort={requestSort}>근무시간</Header>
                         <Header sortKey="manMonth" table="daily" sortState={sortState} onSort={requestSort}>M/M</Header>
@@ -425,10 +427,12 @@ export function DataEditor({ dataset }: DataEditorProps) {
                               />
                             </Cell>
                             <Cell>{employee?.employeeNo}</Cell>
+                            <Cell>{employee?.name}</Cell>
                             <Cell>{project?.projectCode}</Cell>
                             <Cell>
                               <NumberInput
                                 value={entry.hours}
+                                width="narrow"
                                 onChange={(hours) => updateTimeEntry(entryId, { hours })}
                               />
                             </Cell>
@@ -664,14 +668,18 @@ function TextInput({
 
 function NumberInput({
   value,
+  width = 'default',
   onChange,
 }: {
   value: number;
+  width?: 'default' | 'narrow';
   onChange: (value: number) => void;
 }) {
   return (
     <input
-      className="h-9 w-full min-w-[110px] border border-slate-300 px-2 text-right"
+      className={`h-9 w-full border border-slate-300 px-2 text-right ${
+        width === 'narrow' ? 'min-w-[72px] max-w-[88px]' : 'min-w-[110px]'
+      }`}
       type="number"
       value={Math.round(value)}
       onChange={(event) => onChange(Number(event.target.value))}

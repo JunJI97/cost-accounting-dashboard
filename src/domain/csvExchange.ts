@@ -18,7 +18,9 @@ export type CsvImportResult = {
   rows: CostDataset[DatasetKey];
 };
 
-const csvFiles: Array<{ key: DatasetKey; filename: string; label: string }> = [
+export type ExportFileDefinition = { key: DatasetKey; filename: string; label: string };
+
+const csvFiles: ExportFileDefinition[] = [
   { key: 'divisions', filename: 'noa-divisions.csv', label: '본부' },
   { key: 'employees', filename: 'noa-employees.csv', label: '직원' },
   { key: 'projects', filename: 'noa-projects.csv', label: '프로젝트' },

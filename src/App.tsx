@@ -161,7 +161,7 @@ function App() {
       {activeTab === 'simulation' && (
         <>
           <Metrics totals={simulatedTotals} labelPrefix="시뮬레이션" />
-          <section className="mx-auto grid max-w-7xl gap-5 px-5 pb-6 xl:grid-cols-[0.8fr_1.2fr]">
+          <section className="mx-auto grid max-w-7xl gap-5 px-5 pb-6 2xl:grid-cols-[0.9fr_1.1fr]">
             <SimulationPanel
               rows={rows}
               simulatedRows={simulatedRows}
@@ -490,7 +490,7 @@ function SimulationPanel({
         <button
           type="button"
           onClick={saveScenario}
-          className="h-9 rounded-md bg-teal-700 px-3 text-sm font-medium text-white hover:bg-teal-800"
+          className="h-9 shrink-0 whitespace-nowrap rounded-md bg-teal-700 px-3 text-sm font-medium text-white hover:bg-teal-800"
         >
           현재 시나리오 저장
         </button>

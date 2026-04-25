@@ -1,11 +1,13 @@
 import { Download, FileJson, FileSpreadsheet, Upload } from 'lucide-react';
 import { useRef, useState } from 'react';
+import type { SheetData } from 'write-excel-file/universal';
 import {
   downloadCsv,
   downloadJson,
   getCsvFiles,
   parseDatasetCsv,
   parseDatasetJson,
+  type ExportFileDefinition,
 } from '../domain/csvExchange';
 import {
   downloadUserImportTemplate,
@@ -19,6 +21,9 @@ export function CsvExchangePanel({ dataset }: { dataset: CostDataset }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [message, setMessage] = useState('엑셀 템플릿 또는 CSV/JSON 파일을 가져올 수 있습니다.');
   const [importResult, setImportResult] = useState<UserImportResult | null>(null);
+  const [exportFormat, setExportFormat] = useState<'xlsx' | 'csv' | 'json'>('xlsx');
+  const [exportTarget, setExportTarget] = useState<'all' | ExportFileDefinition['key']>('all');
+  const [isExporting, setIsExporting] = useState(false);
   const { setDataset, updateDatasetPart } = useCostingStore();
 
   async function handleImport(file: File) {
@@ -53,10 +58,48 @@ export function CsvExchangePanel({ dataset }: { dataset: CostDataset }) {
   const warnings = importResult?.issues.filter((issue) => issue.severity === 'warning') ?? [];
   const canApplyImport = importResult && errors.length === 0;
   const issueGroups = groupIssuesBySheet(importResult?.issues ?? []);
+  const exportFiles = getCsvFiles();
+
+  async function handleExport() {
+    setIsExporting(true);
+    try {
+      if (exportFormat === 'json') {
+        downloadJson(dataset);
+        setMessage('전체 데이터셋을 JSON으로 내보냈습니다.');
+        return;
+      }
+
+      if (exportTarget === 'all') {
+        if (exportFormat === 'xlsx') {
+          await downloadDatasetExcel(dataset, exportFiles);
+          setMessage('전체 데이터셋을 엑셀 파일로 내보냈습니다.');
+          return;
+        }
+
+        for (const file of exportFiles) {
+          downloadCsv(dataset, file.key);
+        }
+        setMessage('전체 데이터셋을 CSV 파일 여러 개로 내보냈습니다.');
+        return;
+      }
+
+      if (exportFormat === 'xlsx') {
+        const target = exportFiles.find((file) => file.key === exportTarget);
+        await downloadDatasetExcel(dataset, target ? [target] : exportFiles);
+        setMessage(`${target?.label ?? '선택 데이터'} 데이터를 엑셀로 내보냈습니다.`);
+        return;
+      }
+
+      downloadCsv(dataset, exportTarget);
+      setMessage(`${getLabel(exportTarget)} 데이터를 CSV로 내보냈습니다.`);
+    } finally {
+      setIsExporting(false);
+    }
+  }
 
   return (
     <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="text-sm font-semibold text-slate-900">데이터 가져오기 / 내보내기</p>
           <p className="mt-1 text-sm text-slate-500">{message}</p>
@@ -78,25 +121,53 @@ export function CsvExchangePanel({ dataset }: { dataset: CostDataset }) {
             <Upload size={15} aria-hidden="true" />
             가져오기
           </button>
+        </div>
+      </div>
+      <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+          <label className="block">
+            <span className="text-xs font-semibold text-slate-500">내보내기 형식</span>
+            <select
+              className="mt-1 h-9 min-w-[130px] rounded-md border border-slate-300 bg-white px-2 text-sm"
+              value={exportFormat}
+              onChange={(event) => {
+                const value = event.target.value as typeof exportFormat;
+                setExportFormat(value);
+                if (value === 'json') {
+                  setExportTarget('all');
+                }
+              }}
+            >
+              <option value="xlsx">엑셀</option>
+              <option value="csv">CSV</option>
+              <option value="json">JSON</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-xs font-semibold text-slate-500">내보내기 대상</span>
+            <select
+              className="mt-1 h-9 min-w-[190px] rounded-md border border-slate-300 bg-white px-2 text-sm"
+              value={exportTarget}
+              disabled={exportFormat === 'json'}
+              onChange={(event) => setExportTarget(event.target.value as typeof exportTarget)}
+            >
+              <option value="all">전체 데이터셋</option>
+              {exportFiles.map((file) => (
+                <option key={file.key} value={file.key}>
+                  {file.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             type="button"
-            onClick={() => downloadJson(dataset)}
-            className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            onClick={() => void handleExport()}
+            disabled={isExporting}
+            className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100"
           >
-            <FileJson size={15} aria-hidden="true" />
-            JSON
+            {exportFormat === 'json' ? <FileJson size={15} aria-hidden="true" /> : <Download size={15} aria-hidden="true" />}
+            {isExporting ? '내보내는 중' : '내보내기'}
           </button>
-          {getCsvFiles().map((file) => (
-            <button
-              key={file.key}
-              type="button"
-              onClick={() => downloadCsv(dataset, file.key)}
-              className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              <Download size={15} aria-hidden="true" />
-              {file.label}
-            </button>
-          ))}
         </div>
       </div>
       <div className="mt-3 grid gap-2 text-sm text-slate-600 lg:grid-cols-3">
@@ -286,6 +357,64 @@ function ImportSummary({ label, value }: { label: string; value: number }) {
 
 function getLabel(key: keyof CostDataset) {
   return getCsvFiles().find((file) => file.key === key)?.label ?? key;
+}
+
+async function downloadDatasetExcel(dataset: CostDataset, files: ExportFileDefinition[]) {
+  const { default: writeExcelFile } = await import('write-excel-file/universal');
+  const sheets = files.map((file) => {
+    const rows = dataset[file.key] as Array<Record<string, unknown>>;
+    return {
+      sheet: sanitizeSheetName(file.label),
+      data: toSheetData(rows),
+      columns: getColumnWidths(rows),
+    };
+  });
+  const blob = await writeExcelFile(sheets).toBlob();
+  downloadBlob(
+    files.length === 1
+      ? `${files[0].filename.replace(/\.csv$/, '')}.xlsx`
+      : `cost-accounting-dataset-${new Date().toISOString().slice(0, 10)}.xlsx`,
+    blob,
+  );
+}
+
+function toSheetData(rows: Array<Record<string, unknown>>): SheetData {
+  const headers = Object.keys(rows[0] ?? {});
+  return [
+    headers,
+    ...rows.map((row) =>
+      headers.map((header) => {
+        const value = row[header];
+        return value === undefined || value === null ? '' : String(value);
+      }),
+    ),
+  ];
+}
+
+function getColumnWidths(rows: Array<Record<string, unknown>>) {
+  const headers = Object.keys(rows[0] ?? {});
+  return headers.map((header) => ({
+    width: Math.min(
+      Math.max(
+        header.length + 4,
+        ...rows.slice(0, 30).map((row) => String(row[header] ?? '').length + 2),
+      ),
+      34,
+    ),
+  }));
+}
+
+function sanitizeSheetName(name: string) {
+  return name.replace(/[\[\]\/\\:*?]/g, ' ').slice(0, 31).trim() || 'Sheet';
+}
+
+function downloadBlob(filename: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 function groupIssuesBySheet(issues: UserImportResult['issues']) {

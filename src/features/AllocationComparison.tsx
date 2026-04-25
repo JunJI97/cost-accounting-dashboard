@@ -23,7 +23,25 @@ export function AllocationComparison({ dataset }: { dataset: CostDataset }) {
     const best = [...rows].sort((a, b) => b.netProfit - a.netProfit)[0];
     const worst = [...rows].sort((a, b) => a.netProfit - b.netProfit)[0];
 
-    return { basis, totals, best, worst };
+    return { basis, rows, totals, best, worst };
+  });
+  const baselineRows = comparisons[0].rows;
+  const comparisonDetails = comparisons.map((comparison) => {
+    const projectDeltas = comparison.rows
+      .map((row) => {
+        const baseline = baselineRows.find((item) => item.projectId === row.projectId);
+        return {
+          projectName: row.projectName,
+          delta: baseline ? row.netProfit - baseline.netProfit : 0,
+        };
+      })
+      .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+    return {
+      ...comparison,
+      changedProjects: projectDeltas.filter((item) => Math.round(item.delta) !== 0).length,
+      largestDelta: projectDeltas[0],
+    };
   });
 
   return (
@@ -44,19 +62,32 @@ export function AllocationComparison({ dataset }: { dataset: CostDataset }) {
           />
         </div>
         <div className="mt-4 grid gap-4 lg:grid-cols-3">
-          {comparisons.map(({ basis, totals, best, worst }) => (
+          {comparisonDetails.map(({ basis, totals, best, worst, changedProjects, largestDelta }) => (
             <div key={basis} className="rounded-md border border-slate-200 p-4">
               <p className="text-sm font-semibold text-teal-700">{allocationLabels[basis]}</p>
               <dl className="mt-3 grid gap-2 text-sm">
                 <ComparisonRow label="총 배부 공통비" value={currency.format(totals.allocatedIndirectCost)} />
                 <ComparisonRow label="전체 순이익" value={currency.format(totals.netProfit)} />
                 <ComparisonRow label="전체 이익률" value={percent(totals.netProfit / totals.revenue)} />
+                <ComparisonRow label="기준 대비 변동 프로젝트" value={`${changedProjects}개`} />
+                <ComparisonRow
+                  label="최대 손익 변동"
+                  value={
+                    largestDelta
+                      ? `${largestDelta.projectName} ${currency.format(largestDelta.delta)}`
+                      : '-'
+                  }
+                />
                 <ComparisonRow label="최고 수익 프로젝트" value={best.projectName} />
                 <ComparisonRow label="최저 수익 프로젝트" value={worst.projectName} />
               </dl>
             </div>
           ))}
         </div>
+        <p className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">
+          총 배부 공통비와 전체 순이익은 같은 공통비 풀을 전액 배부하므로 기준별로 동일할 수 있습니다.
+          차이는 프로젝트별 배부액과 순위 변동에서 확인합니다.
+        </p>
       </div>
     </section>
   );
