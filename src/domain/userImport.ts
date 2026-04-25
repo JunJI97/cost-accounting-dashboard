@@ -51,7 +51,7 @@ const templateRows: Record<string, Array<Record<string, string | number>>> = {
   '작성 안내': [
     {
       항목: '업로드 방식',
-      설명: '이 파일의 5개 데이터 시트를 작성한 뒤 데이터 관리 > CSV/JSON > 가져오기로 업로드합니다.',
+      설명: '이 파일의 5개 데이터 시트를 작성한 뒤 데이터 관리 > 엑셀 연동 > 가져오기로 업로드합니다.',
     },
     {
       항목: '업무 키',

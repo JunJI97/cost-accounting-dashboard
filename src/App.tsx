@@ -96,10 +96,13 @@ function App() {
         <div className="mx-auto max-w-7xl px-5 py-5">
           <div className="flex flex-col gap-1">
             <div>
-              <p className="text-sm font-semibold text-teal-700">NOA Cost Accounting</p>
+              <p className="text-sm font-semibold text-teal-700">프로젝트 원가·수익성 분석 툴</p>
               <h1 className="mt-1 text-2xl font-semibold tracking-normal text-slate-950">
-                원가 집계 및 관리회계 분석
+                CostPilot
               </h1>
+              <p className="mt-1 text-sm text-slate-500">
+                인력 투입, 직접비, 외주비, 공통비를 통합해 프로젝트별 손익과 원가 동인을 분석합니다.
+              </p>
             </div>
           </div>
 
@@ -136,7 +139,11 @@ function App() {
           <section className="mx-auto grid max-w-7xl gap-5 px-5 pb-6">
             <DashboardCommandCenter rows={rows} totals={totals} />
             <DashboardVisuals rows={rows} />
-            <ProjectProfitCard rows={rows} allocationBasis={allocationBasis} />
+            <ProjectProfitCard
+              rows={rows}
+              allocationBasis={allocationBasis}
+              divisionCount={dataset.divisions.length}
+            />
             <CostCompositionChart chartRows={chartRows} />
           </section>
         </>
@@ -163,7 +170,11 @@ function App() {
             </div>
           </section>
           <section className="mx-auto max-w-7xl px-5 pb-6">
-            <ProjectProfitCard rows={rows} allocationBasis={allocationBasis} />
+            <ProjectProfitCard
+              rows={rows}
+              allocationBasis={allocationBasis}
+              divisionCount={dataset.divisions.length}
+            />
           </section>
           <AllocationComparison dataset={dataset} />
         </>
@@ -181,7 +192,11 @@ function App() {
               simulatedTotals={simulatedTotals}
               totals={totals}
             />
-            <ProjectProfitCard rows={simulatedRows} allocationBasis={allocationBasis} />
+            <ProjectProfitCard
+              rows={simulatedRows}
+              allocationBasis={allocationBasis}
+              divisionCount={dataset.divisions.length}
+            />
           </section>
         </>
       )}
@@ -384,16 +399,20 @@ function Metrics({
 function ProjectProfitCard({
   rows,
   allocationBasis,
+  divisionCount,
 }: {
   rows: ProjectProfitability[];
   allocationBasis: AllocationBasis;
+  divisionCount: number;
 }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="text-base font-semibold text-slate-950">프로젝트 손익</h2>
-          <p className="text-sm text-slate-500">5개 본부, 20개 프로젝트 기준</p>
+          <p className="text-sm text-slate-500">
+            {number.format(divisionCount)}개 본부, {number.format(rows.length)}개 프로젝트 기준
+          </p>
         </div>
         <span className="text-sm font-medium text-teal-700">
           현재 기준: {allocationLabels[allocationBasis]}
@@ -472,7 +491,9 @@ function DashboardVisuals({ rows }: { rows: ProjectProfitability[] }) {
       <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-col gap-1">
           <h2 className="text-base font-semibold text-slate-950">본부별 매출/순이익</h2>
-          <p className="text-sm text-slate-500">20개 프로젝트를 본부 단위로 압축해 수익 기여도를 비교합니다.</p>
+          <p className="text-sm text-slate-500">
+            {number.format(rows.length)}개 프로젝트를 본부 단위로 압축해 수익 기여도를 비교합니다.
+          </p>
         </div>
         <div className="mt-4 h-72">
           <ResponsiveContainer width="100%" height="100%">
