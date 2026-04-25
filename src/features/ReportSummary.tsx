@@ -177,75 +177,6 @@ export function ReportSummary({ rows }: { rows: ProjectProfitability[] }) {
     }
   }
 
-  async function exportDetailExcel() {
-    if (isExportingExcel) return;
-
-    setIsExportingExcel(true);
-    setExcelMessage('상세 손익 엑셀을 생성하고 있습니다.');
-    try {
-      await saveWorkbook(`project-profitability-detail-${today()}.xlsx`, [
-        {
-          sheet: '프로젝트 손익',
-          data: toSheetData(
-            [
-              '프로젝트 ID',
-              '프로젝트명',
-              '본부',
-              '매출',
-              '투입시간',
-              'M/M',
-              '내부 인건비',
-              '외주 용역비',
-              '직접경비',
-              '배부 공통비',
-              '총원가',
-              '순이익',
-              '이익률',
-              '원가 동인',
-            ],
-            rows.map((row) => [
-              row.projectId,
-              row.projectName,
-              row.divisionName,
-              Math.round(row.revenue),
-              Math.round(row.laborHours),
-              Number(row.manMonths.toFixed(2)),
-              Math.round(row.internalLaborCost),
-              Math.round(row.outsourcingCost),
-              Math.round(row.directExpenseCost),
-              Math.round(row.allocatedIndirectCost),
-              Math.round(row.totalCost),
-              Math.round(row.netProfit),
-              percent(row.margin),
-              row.primaryDriver,
-            ]),
-          ),
-          columns: [
-            { width: 16 },
-            { width: 32 },
-            { width: 20 },
-            { width: 16 },
-            { width: 12 },
-            { width: 10 },
-            { width: 16 },
-            { width: 16 },
-            { width: 16 },
-            { width: 16 },
-            { width: 16 },
-            { width: 16 },
-            { width: 12 },
-            { width: 16 },
-          ],
-        },
-      ]);
-      setExcelMessage('상세 손익 엑셀 다운로드를 시작했습니다.');
-    } catch (error) {
-      setExcelMessage(error instanceof Error ? `엑셀 생성 실패: ${error.message}` : '엑셀 생성 중 오류가 발생했습니다.');
-    } finally {
-      setIsExportingExcel(false);
-    }
-  }
-
   async function exportReportPdf() {
     if (!reportRef.current || isExportingPdf) return;
 
@@ -419,14 +350,6 @@ export function ReportSummary({ rows }: { rows: ProjectProfitability[] }) {
               className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               {isExportingExcel ? '엑셀 생성 중' : '리포트 엑셀'}
-            </button>
-            <button
-              type="button"
-              onClick={() => void exportDetailExcel()}
-              disabled={isExportingExcel}
-              className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              상세 손익 엑셀
             </button>
           </div>
         </div>

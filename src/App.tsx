@@ -415,10 +415,10 @@ function ChartCard({
             <YAxis tick={{ fontSize: 12 }} />
             <Tooltip formatter={(value) => `${number.format(Number(value))}백만원`} />
             <Legend />
-            <Bar dataKey="내부인건비" stackId="cost" fill="#0f766e" />
-            <Bar dataKey="외주용역비" stackId="cost" fill="#7c3aed" />
-            <Bar dataKey="직접경비" stackId="cost" fill="#2563eb" />
-            <Bar dataKey="공통비" stackId="cost" fill="#f59e0b" />
+            <Bar dataKey="내부인건비" stackId="cost" fill="#5b8e7d" />
+            <Bar dataKey="외주용역비" stackId="cost" fill="#8c7aa9" />
+            <Bar dataKey="직접경비" stackId="cost" fill="#6f8fbf" />
+            <Bar dataKey="공통비" stackId="cost" fill="#c9a45c" />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -698,7 +698,7 @@ function buildWaterfallRows(
       base: Math.round(Math.min(runningProfit, nextProfit) / 1000000),
       value: Math.round(Math.abs(change.amount) / 1000000),
       displayValue: change.amount,
-      fill: change.amount >= 0 ? '#0f766e' : '#dc2626',
+      fill: change.amount >= 0 ? '#4f8f7b' : '#c66a5a',
     });
     runningProfit = nextProfit;
   }
@@ -708,7 +708,7 @@ function buildWaterfallRows(
     base: 0,
     value: Math.round(finalProfit / 1000000),
     displayValue: finalProfit,
-    fill: '#2563eb',
+    fill: '#6f8fbf',
   });
 
   return rows;
