@@ -22,6 +22,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell as RechartsCell,
   Legend,
   ResponsiveContainer,
   Tooltip,
@@ -73,8 +74,9 @@ function App() {
 
   const chartRows = rows.slice(0, 8).map((row) => ({
     name: row.projectName.replace(' 관리회계 고도화', ''),
-    인건비: Math.round(row.laborCost / 1000000),
-    직접비: Math.round(row.directCost / 1000000),
+    내부인건비: Math.round(row.internalLaborCost / 1000000),
+    외주용역비: Math.round(row.outsourcingCost / 1000000),
+    직접경비: Math.round(row.directExpenseCost / 1000000),
     공통비: Math.round(row.allocatedIndirectCost / 1000000),
   }));
 
@@ -122,6 +124,7 @@ function App() {
         <>
           <Metrics totals={totals} />
           <section className="mx-auto grid max-w-7xl gap-5 px-5 pb-6">
+            <DashboardCommandCenter rows={rows} totals={totals} />
             <ProjectProfitCard rows={rows} allocationBasis={allocationBasis} />
             <ChartCard chartRows={chartRows} />
           </section>
@@ -138,7 +141,7 @@ function App() {
                 <div>
                   <h2 className="text-base font-semibold text-slate-950">배부 기준 선택</h2>
                   <p className="text-sm text-slate-500">
-                    선택한 기준은 대시보드, 시뮬레이션, 리포트 계산에 즉시 반영됩니다.
+                    선택한 기준은 아래 프로젝트 손익표와 대시보드, 시뮬레이션, 리포트 계산에 즉시 반영됩니다.
                   </p>
                 </div>
                 <AllocationSelector
@@ -147,6 +150,9 @@ function App() {
                 />
               </div>
             </div>
+          </section>
+          <section className="mx-auto max-w-7xl px-5 pb-6">
+            <ProjectProfitCard rows={rows} allocationBasis={allocationBasis} />
           </section>
           <AllocationComparison dataset={dataset} />
         </>
@@ -170,14 +176,147 @@ function App() {
       )}
 
       {activeTab === 'report' && (
-        <>
-          <section className="mx-auto max-w-7xl px-5 py-5">
-            <ProjectProfitCard rows={rows} allocationBasis={allocationBasis} />
-          </section>
-          <ReportSummary rows={rows} />
-        </>
+        <ReportSummary rows={rows} />
       )}
     </main>
+  );
+}
+
+function DashboardCommandCenter({
+  rows,
+  totals,
+}: {
+  rows: ProjectProfitability[];
+  totals: ReturnType<typeof summarize>;
+}) {
+  const topProject = [...rows].sort((a, b) => b.netProfit - a.netProfit)[0];
+  const weakProject = [...rows].sort((a, b) => a.margin - b.margin)[0];
+  const highOutsourcing = [...rows].sort(
+    (a, b) => ratio(b.outsourcingCost, b.totalCost) - ratio(a.outsourcingCost, a.totalCost),
+  )[0];
+  const divisionRows = Object.values(
+    rows.reduce<
+      Record<string, { divisionName: string; revenue: number; netProfit: number; totalCost: number }>
+    >((acc, row) => {
+      acc[row.divisionName] ??= {
+        divisionName: row.divisionName,
+        revenue: 0,
+        netProfit: 0,
+        totalCost: 0,
+      };
+      acc[row.divisionName].revenue += row.revenue;
+      acc[row.divisionName].netProfit += row.netProfit;
+      acc[row.divisionName].totalCost += row.totalCost;
+      return acc;
+    }, {}),
+  ).sort((a, b) => ratio(b.netProfit, b.revenue) - ratio(a.netProfit, a.revenue));
+  const lowMarginCount = rows.filter((row) => row.margin < 0.1).length;
+  const lossCount = rows.filter((row) => row.netProfit < 0).length;
+  const costCoverage = ratio(totals.totalCost, totals.revenue);
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-base font-semibold text-slate-950">경영 현황 요약</h2>
+          <p className="text-sm text-slate-500">수익성, 원가 구조, 위험 프로젝트를 한 번에 확인합니다.</p>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <DashboardSignal
+            label="원가율"
+            value={percent(costCoverage)}
+            detail={`매출 ${currency.format(totals.revenue)} 대비 총원가`}
+            tone={costCoverage > 0.9 ? 'danger' : costCoverage > 0.75 ? 'warning' : 'good'}
+          />
+          <DashboardSignal
+            label="저마진 프로젝트"
+            value={`${number.format(lowMarginCount)}개`}
+            detail={`손실 프로젝트 ${number.format(lossCount)}개 포함`}
+            tone={lowMarginCount > 5 ? 'danger' : lowMarginCount > 2 ? 'warning' : 'good'}
+          />
+          <DashboardSignal
+            label="최고 수익"
+            value={currency.format(topProject.netProfit)}
+            detail={topProject.projectName}
+            tone="good"
+          />
+          <DashboardSignal
+            label="외주 의존 리스크"
+            value={percent(ratio(highOutsourcing.outsourcingCost, highOutsourcing.totalCost))}
+            detail={highOutsourcing.projectName}
+            tone="purple"
+          />
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-base font-semibold text-slate-950">본부별 성과 스냅샷</h2>
+          <p className="text-sm text-slate-500">이익률 기준으로 본부 수익성을 정렬했습니다.</p>
+        </div>
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-left text-slate-500">
+                <th className="h-9 px-2 font-medium">본부</th>
+                <th className="h-9 px-2 text-right font-medium">매출</th>
+                <th className="h-9 px-2 text-right font-medium">순이익</th>
+                <th className="h-9 px-2 text-right font-medium">이익률</th>
+              </tr>
+            </thead>
+            <tbody>
+              {divisionRows.map((division) => (
+                <tr key={division.divisionName} className="border-b border-slate-100">
+                  <td className="px-2 py-2 font-medium text-slate-900">{division.divisionName}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">
+                    {currency.format(division.revenue)}
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums">
+                    {currency.format(division.netProfit)}
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums">
+                    {percent(ratio(division.netProfit, division.revenue))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-4 rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">
+          개선 우선순위: <b className="text-slate-900">{weakProject.projectName}</b>의 이익률{' '}
+          <b className="text-red-700">{percent(weakProject.margin)}</b>을 먼저 점검하세요.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DashboardSignal({
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  tone: 'good' | 'warning' | 'danger' | 'purple';
+}) {
+  const toneClass = {
+    good: 'text-teal-700 bg-teal-50',
+    warning: 'text-amber-700 bg-amber-50',
+    danger: 'text-red-700 bg-red-50',
+    purple: 'text-violet-700 bg-violet-50',
+  }[tone];
+
+  return (
+    <div className="rounded-md border border-slate-200 p-3">
+      <p className="text-xs font-medium text-slate-500">{label}</p>
+      <p className={`mt-2 inline-flex rounded-md px-2 py-1 text-base font-semibold ${toneClass}`}>
+        {value}
+      </p>
+      <p className="mt-2 truncate text-sm text-slate-600">{detail}</p>
+    </div>
   );
 }
 
@@ -257,7 +396,13 @@ function ProjectProfitCard({
 function ChartCard({
   chartRows,
 }: {
-  chartRows: Array<{ name: string; 인건비: number; 직접비: number; 공통비: number }>;
+  chartRows: Array<{
+    name: string;
+    내부인건비: number;
+    외주용역비: number;
+    직접경비: number;
+    공통비: number;
+  }>;
 }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -270,14 +415,22 @@ function ChartCard({
             <YAxis tick={{ fontSize: 12 }} />
             <Tooltip formatter={(value) => `${number.format(Number(value))}백만원`} />
             <Legend />
-            <Bar dataKey="인건비" stackId="cost" fill="#0f766e" />
-            <Bar dataKey="직접비" stackId="cost" fill="#2563eb" />
+            <Bar dataKey="내부인건비" stackId="cost" fill="#0f766e" />
+            <Bar dataKey="외주용역비" stackId="cost" fill="#7c3aed" />
+            <Bar dataKey="직접경비" stackId="cost" fill="#2563eb" />
             <Bar dataKey="공통비" stackId="cost" fill="#f59e0b" />
           </BarChart>
         </ResponsiveContainer>
       </div>
     </div>
   );
+}
+
+function ratio(numerator: number, denominator: number) {
+  if (!Number.isFinite(denominator) || denominator === 0) {
+    return 0;
+  }
+  return numerator / denominator;
 }
 
 function SimulationPanel({
@@ -328,6 +481,7 @@ function SimulationPanel({
       totalProfitDelta: scenarioTotals.netProfit - totals.netProfit,
     };
   });
+  const waterfallRows = buildWaterfallRows(selectedProject, simulatedProject);
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -358,22 +512,28 @@ function SimulationPanel({
         </label>
         <NumberField
           label="추가 인력"
+          suffix="명"
           value={simulation.additionalPeople}
           onChange={(additionalPeople) => setSimulation({ additionalPeople })}
         />
         <NumberField
           label="1인당 투입 시간"
+          suffix="시간/월"
           value={simulation.hoursPerPerson}
           onChange={(hoursPerPerson) => setSimulation({ hoursPerPerson })}
         />
         <NumberField
           label="시급"
+          format="currency"
+          suffix="원/시간"
           value={simulation.hourlyRate}
           step={1000}
           onChange={(hourlyRate) => setSimulation({ hourlyRate })}
         />
         <NumberField
           label="매출 증감"
+          format="currency"
+          suffix="원"
           value={simulation.revenueDelta}
           step={1000000}
           min={-selectedProject.revenue}
@@ -381,6 +541,8 @@ function SimulationPanel({
         />
         <NumberField
           label="공통비 증감"
+          format="currency"
+          suffix="원"
           value={simulation.indirectCostDelta}
           step={1000000}
           min={-1000000000}
@@ -402,6 +564,30 @@ function SimulationPanel({
             value={currency.format(simulatedTotals.netProfit - totals.netProfit)}
           />
         </dl>
+      </div>
+
+      <div className="mt-5 rounded-md border border-slate-200 p-4">
+        <p className="text-sm font-semibold text-slate-900">이익 변화 폭포수</p>
+        <div className="mt-3 h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={waterfallRows} margin={{ top: 12, right: 8, left: 8, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+              <YAxis tick={{ fontSize: 12 }} tickFormatter={(value) => `${number.format(Number(value))}백만`} />
+              <Tooltip
+                formatter={(_, __, item) =>
+                  `${currency.format(Number(item.payload.displayValue))}`
+                }
+              />
+              <Bar dataKey="base" stackId="waterfall" fill="transparent" />
+              <Bar dataKey="value" stackId="waterfall">
+                {waterfallRows.map((row) => (
+                  <RechartsCell key={row.name} fill={row.fill} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
       </div>
 
       <div className="mt-5">
@@ -470,6 +656,64 @@ function SimulationPanel({
   );
 }
 
+function buildWaterfallRows(
+  selectedProject: ProjectProfitability,
+  simulatedProject: ProjectProfitability,
+) {
+  const currentProfit = selectedProject.netProfit;
+  const revenueImpact = simulatedProject.revenue - selectedProject.revenue;
+  const internalLaborImpact = -(simulatedProject.internalLaborCost - selectedProject.internalLaborCost);
+  const outsourcingImpact = -(simulatedProject.outsourcingCost - selectedProject.outsourcingCost);
+  const indirectImpact = -(
+    simulatedProject.allocatedIndirectCost - selectedProject.allocatedIndirectCost
+  );
+  const directExpenseImpact = -(
+    simulatedProject.directExpenseCost - selectedProject.directExpenseCost
+  );
+  const finalProfit = simulatedProject.netProfit;
+
+  const changes = [
+    { name: '매출 증감', amount: revenueImpact },
+    { name: '내부 인건비', amount: internalLaborImpact },
+    { name: '외주 용역비', amount: outsourcingImpact },
+    { name: '직접경비', amount: directExpenseImpact },
+    { name: '공통비 배부', amount: indirectImpact },
+  ].filter((row) => Math.round(row.amount) !== 0);
+
+  let runningProfit = currentProfit;
+  const rows = [
+    {
+      name: '현재 이익',
+      base: 0,
+      value: Math.round(currentProfit / 1000000),
+      displayValue: currentProfit,
+      fill: '#334155',
+    },
+  ];
+
+  for (const change of changes) {
+    const nextProfit = runningProfit + change.amount;
+    rows.push({
+      name: change.name,
+      base: Math.round(Math.min(runningProfit, nextProfit) / 1000000),
+      value: Math.round(Math.abs(change.amount) / 1000000),
+      displayValue: change.amount,
+      fill: change.amount >= 0 ? '#0f766e' : '#dc2626',
+    });
+    runningProfit = nextProfit;
+  }
+
+  rows.push({
+    name: '예상 이익',
+    base: 0,
+    value: Math.round(finalProfit / 1000000),
+    displayValue: finalProfit,
+    fill: '#2563eb',
+  });
+
+  return rows;
+}
+
 function Metric({
   icon: Icon,
   label,
@@ -506,13 +750,23 @@ function ProfitabilityTable({ rows }: { rows: ProjectProfitability[] }) {
         cell: ({ getValue }) => currency.format(getValue<number>()),
       },
       {
-        accessorKey: 'laborCost',
-        header: '인건비',
+        accessorKey: 'internalLaborCost',
+        header: '내부 인건비',
         cell: ({ getValue }) => currency.format(getValue<number>()),
       },
       {
-        accessorKey: 'directCost',
-        header: '직접비',
+        accessorKey: 'manMonths',
+        header: 'M/M',
+        cell: ({ getValue }) => getValue<number>().toFixed(2),
+      },
+      {
+        accessorKey: 'outsourcingCost',
+        header: '외주 용역비',
+        cell: ({ getValue }) => currency.format(getValue<number>()),
+      },
+      {
+        accessorKey: 'directExpenseCost',
+        header: '직접경비',
         cell: ({ getValue }) => currency.format(getValue<number>()),
       },
       {
@@ -545,7 +799,7 @@ function ProfitabilityTable({ rows }: { rows: ProjectProfitability[] }) {
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[980px] border-collapse text-sm">
+      <table className="w-full min-w-[1180px] border-collapse text-sm">
         <thead>
           {table.getHeaderGroups().map((headerGroup) => (
             <tr key={headerGroup.id} className="border-b border-slate-200">
@@ -585,29 +839,58 @@ function ProfitabilityTable({ rows }: { rows: ProjectProfitability[] }) {
 function NumberField({
   label,
   value,
+  suffix,
+  format = 'number',
   step = 1,
   min = 0,
   onChange,
 }: {
   label: string;
   value: number;
+  suffix?: string;
+  format?: 'number' | 'currency';
   step?: number;
   min?: number;
   onChange: (value: number) => void;
 }) {
+  const displayValue = format === 'currency' ? formatNumberInput(value) : String(value);
+
   return (
     <label className="block">
       <span className="text-sm font-medium text-slate-700">{label}</span>
-      <input
-        className="mt-1 h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm"
-        min={min}
-        step={step}
-        type="number"
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-      />
+      <div className="relative mt-1">
+        <input
+          className={`h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm tabular-nums ${
+            suffix ? 'pr-20' : ''
+          } ${format === 'currency' ? 'text-right' : ''}`}
+          inputMode={step % 1 === 0 ? 'numeric' : 'decimal'}
+          value={displayValue}
+          onChange={(event) => {
+            const nextValue =
+              format === 'currency'
+                ? parseFormattedNumber(event.target.value)
+                : Number(event.target.value);
+            onChange(Math.max(min, Number.isFinite(nextValue) ? nextValue : 0));
+          }}
+        />
+        {suffix && (
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-slate-500">
+            {suffix}
+          </span>
+        )}
+      </div>
     </label>
   );
+}
+
+function formatNumberInput(value: number) {
+  return Math.round(value).toLocaleString('ko-KR');
+}
+
+function parseFormattedNumber(value: string) {
+  const normalized = value.replace(/,/g, '').replace(/[^\d.-]/g, '');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function Result({ label, value }: { label: string; value: string }) {

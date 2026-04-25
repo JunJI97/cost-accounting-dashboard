@@ -69,7 +69,13 @@ export const useCostingStore = create<CostingState>()(
             [key]: value,
           },
         })),
-      resetDataset: () => set({ dataset: createSeedDataset() }),
+      resetDataset: () =>
+        set({
+          dataset: createSeedDataset(),
+          allocationBasis: 'laborHours',
+          simulation: defaultSimulation,
+          savedScenarios: [],
+        }),
       setAllocationBasis: (allocationBasis) => set({ allocationBasis }),
       setSimulation: (patch) =>
         set((state) => ({ simulation: { ...state.simulation, ...patch } })),
@@ -123,9 +129,12 @@ export const useCostingStore = create<CostingState>()(
                 ...state.dataset.projects,
                 {
                   id,
+                  projectCode: `PRJ-${String(state.dataset.projects.length + 1).padStart(3, '0')}`,
                   name: `신규 프로젝트 ${state.dataset.projects.length + 1}`,
                   divisionId,
                   revenue: 50000000,
+                  startDate: '2026-04-01',
+                  endDate: '2026-06-30',
                   allocationWeight: 1,
                 },
               ],
@@ -139,6 +148,7 @@ export const useCostingStore = create<CostingState>()(
             projects: state.dataset.projects.filter((project) => project.id !== projectId),
             timeEntries: state.dataset.timeEntries.filter((entry) => entry.projectId !== projectId),
             directCosts: state.dataset.directCosts.filter((cost) => cost.projectId !== projectId),
+            expenses: state.dataset.expenses.filter((expense) => expense.projectId !== projectId),
           },
         })),
       updateEmployeeRate: (employeeId, hourlyRate) =>
@@ -161,9 +171,14 @@ export const useCostingStore = create<CostingState>()(
                 ...state.dataset.employees,
                 {
                   id,
+                  employeeNo: `E-${1000 + state.dataset.employees.length + 1}`,
                   name: `신규 직원 ${state.dataset.employees.length + 1}`,
+                  birthDate: '1990-01-01',
                   divisionId,
                   hourlyRate: 50000,
+                  baseSalary: 8000000,
+                  overtimeAllowance: 600000,
+                  mealAllowance: 200000,
                 },
               ],
             },
@@ -210,7 +225,15 @@ export const useCostingStore = create<CostingState>()(
           return {
             dataset: {
               ...state.dataset,
-              timeEntries: [{ ...pair, hours: 40 }, ...state.dataset.timeEntries],
+              timeEntries: [
+                {
+                  id: nextId('te-custom', state.dataset.timeEntries.map((entry) => entry.id ?? '')),
+                  date: new Date().toISOString().slice(0, 10),
+                  ...pair,
+                  hours: 8,
+                },
+                ...state.dataset.timeEntries,
+              ],
             },
           };
         }),
@@ -315,17 +338,72 @@ export const useCostingStore = create<CostingState>()(
 );
 
 function migrateDataset(dataset: CostDataset) {
+  const projects = dataset.projects.map((project, index) => {
+    const match = project.id.match(/^prj-(\d+)$/);
+    const seedIndex = match ? Number(match[1]) - 1 : -1;
+    const isOldSeedName = /^P-\d{2} 관리회계 고도화$/.test(project.name);
+
+    return {
+      ...project,
+      projectCode: project.projectCode ?? `PRJ-${String(index + 1).padStart(3, '0')}`,
+      startDate: project.startDate ?? '2026-01-01',
+      endDate: project.endDate ?? '2026-06-30',
+      name:
+        isOldSeedName && seedProjectNames[seedIndex] ? seedProjectNames[seedIndex] : project.name,
+    };
+  });
+  const employees = dataset.employees.map((employee, index) => ({
+    ...employee,
+    employeeNo: employee.employeeNo ?? `E-${1001 + index}`,
+    birthDate: employee.birthDate ?? '1990-01-01',
+    baseSalary: employee.baseSalary ?? employee.hourlyRate * 160,
+    overtimeAllowance: employee.overtimeAllowance ?? Math.round(employee.hourlyRate * 12),
+    mealAllowance: employee.mealAllowance ?? 200000,
+  }));
+  const timeEntries = dataset.timeEntries.map((entry, index) => ({
+    ...entry,
+    id: entry.id ?? `te-${index + 1}`,
+    date: entry.date ?? '2026-04-01',
+  }));
+  const expenses =
+    dataset.expenses ??
+    [
+      ...dataset.directCosts.map((cost, index) => ({
+        id: `exp-d-${index + 1}`,
+        expenseDate: '2026-04-01',
+        projectId: cost.projectId,
+        expenseType: cost.label.includes('외주') ? ('외주비' as const) : ('직접경비' as const),
+        amount: cost.amount,
+        description: cost.label,
+      })),
+      ...dataset.indirectCosts.map((cost, index) => ({
+        id: `exp-i-${index + 1}`,
+        expenseDate: '2026-04-01',
+        projectId: undefined,
+        expenseType: '판관비' as const,
+        amount: cost.amount,
+        description: cost.label,
+      })),
+    ];
+
   return {
     ...dataset,
-    projects: dataset.projects.map((project) => {
-      const match = project.id.match(/^prj-(\d+)$/);
-      const seedIndex = match ? Number(match[1]) - 1 : -1;
-      const isOldSeedName = /^P-\d{2} 관리회계 고도화$/.test(project.name);
-
-      return isOldSeedName && seedProjectNames[seedIndex]
-        ? { ...project, name: seedProjectNames[seedIndex] }
-        : project;
-    }),
+    employees,
+    projects,
+    projectAssignments:
+      dataset.projectAssignments ??
+      timeEntries.map((entry, index) => {
+        const project = projects.find((item) => item.id === entry.projectId);
+        return {
+          id: `pa-${index + 1}`,
+          employeeId: entry.employeeId,
+          projectId: entry.projectId,
+          startDate: project?.startDate ?? '2026-01-01',
+          endDate: project?.endDate ?? '2026-06-30',
+        };
+      }),
+    timeEntries,
+    expenses,
   };
 }
 

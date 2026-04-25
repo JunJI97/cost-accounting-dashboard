@@ -20,6 +20,18 @@ describe('costing engine', () => {
     );
   });
 
+  it('splits internal labor, outsourcing, and direct expenses', () => {
+    const rows = calculateProjectProfitability(seedData, 'laborHours');
+    const totals = summarize(rows);
+
+    expect(totals.internalLaborCost).toBeGreaterThan(0);
+    expect(totals.outsourcingCost).toBeGreaterThan(0);
+    expect(totals.directExpenseCost).toBeGreaterThan(0);
+    expect(Math.round(totals.directCost)).toBe(
+      Math.round(totals.outsourcingCost + totals.directExpenseCost),
+    );
+  });
+
   it('applies additional staff to the selected project in simulation', () => {
     const baseline = calculateProjectProfitability(seedData, 'laborCost');
     const scenarioDataset = simulateAdditionalStaff(seedData, {
@@ -52,10 +64,12 @@ describe('costing engine', () => {
         { id: 'prj-a', name: 'A프로젝트', divisionId: 'div-a', revenue: 1000 },
         { id: 'prj-b', name: 'B프로젝트', divisionId: 'div-b', revenue: 1000 },
       ],
+      projectAssignments: [],
       timeEntries: [
         { employeeId: 'emp-a', projectId: 'prj-a', hours: 10 },
         { employeeId: 'emp-b', projectId: 'prj-b', hours: 10 },
       ],
+      expenses: [],
       directCosts: [],
       indirectCosts: [{ id: 'ic-a', label: 'A본부 공통비', amount: 500, divisionId: 'div-a' }],
     };
@@ -77,10 +91,12 @@ describe('costing engine', () => {
         { id: 'prj-a', name: 'A프로젝트', divisionId: 'div-a', revenue: 1000, allocationWeight: 3 },
         { id: 'prj-b', name: 'B프로젝트', divisionId: 'div-a', revenue: 1000, allocationWeight: 1 },
       ],
+      projectAssignments: [],
       timeEntries: [
         { employeeId: 'emp-a', projectId: 'prj-a', hours: 10 },
         { employeeId: 'emp-b', projectId: 'prj-b', hours: 10 },
       ],
+      expenses: [],
       directCosts: [],
       indirectCosts: [{ id: 'ic-a', label: '전사 공통비', amount: 400 }],
     };

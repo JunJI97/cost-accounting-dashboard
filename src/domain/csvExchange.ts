@@ -4,8 +4,10 @@ import type {
   DirectCost,
   Division,
   Employee,
+  ExpenseLedger,
   IndirectCost,
   Project,
+  ProjectAssignment,
   TimeEntry,
 } from './types';
 
@@ -20,7 +22,9 @@ const csvFiles: Array<{ key: DatasetKey; filename: string; label: string }> = [
   { key: 'divisions', filename: 'noa-divisions.csv', label: '본부' },
   { key: 'employees', filename: 'noa-employees.csv', label: '직원' },
   { key: 'projects', filename: 'noa-projects.csv', label: '프로젝트' },
+  { key: 'projectAssignments', filename: 'noa-project-assignments.csv', label: '프로젝트 배정' },
   { key: 'timeEntries', filename: 'noa-timesheets.csv', label: 'Time-sheet' },
+  { key: 'expenses', filename: 'noa-expense-ledger.csv', label: 'Expense Ledger' },
   { key: 'directCosts', filename: 'noa-direct-costs.csv', label: '직접비' },
   { key: 'indirectCosts', filename: 'noa-indirect-costs.csv', label: '공통비' },
 ];
@@ -64,8 +68,40 @@ export function parseDatasetCsv(csv: string, existingDataset?: CostDataset): Csv
   const headers = Object.keys(rows[0] ?? {});
   const has = (...required: string[]) => required.every((header) => headers.includes(header));
 
+  if (has('employeeId', 'projectId', 'startDate', 'endDate')) {
+    const assignments = rows.map((row, index) => ({
+      id: row.id || `pa-import-${index + 1}`,
+      employeeId: row.employeeId,
+      projectId: row.projectId,
+      startDate: row.startDate,
+      endDate: row.endDate,
+    })) satisfies ProjectAssignment[];
+
+    if (existingDataset) {
+      validateReferences(
+        assignments,
+        'employeeId',
+        new Set(existingDataset.employees.map((employee) => employee.id)),
+        '직원 ID',
+      );
+      validateReferences(
+        assignments,
+        'projectId',
+        new Set(existingDataset.projects.map((project) => project.id)),
+        '프로젝트 ID',
+      );
+    }
+
+    return {
+      key: 'projectAssignments',
+      rows: assignments,
+    };
+  }
+
   if (has('employeeId', 'projectId', 'hours')) {
     const timeEntries = rows.map((row) => ({
+      id: row.id || undefined,
+      date: row.date || undefined,
       employeeId: row.employeeId,
       projectId: row.projectId,
       hours: toNumber(row.hours),
@@ -89,6 +125,32 @@ export function parseDatasetCsv(csv: string, existingDataset?: CostDataset): Csv
     return {
       key: 'timeEntries',
       rows: timeEntries,
+    };
+  }
+
+  if (has('expenseDate', 'expenseType', 'amount', 'description')) {
+    const expenses = rows.map((row, index) => ({
+      id: row.id || `exp-import-${index + 1}`,
+      expenseDate: row.expenseDate,
+      projectId: row.projectId || undefined,
+      expenseType: row.expenseType as ExpenseLedger['expenseType'],
+      amount: toNumber(row.amount),
+      description: row.description,
+    })) satisfies ExpenseLedger[];
+
+    if (existingDataset) {
+      const projectExpenses = expenses.filter((expense) => expense.projectId);
+      validateReferences(
+        projectExpenses,
+        'projectId',
+        new Set(existingDataset.projects.map((project) => project.id)),
+        '프로젝트 ID',
+      );
+    }
+
+    return {
+      key: 'expenses',
+      rows: expenses,
     };
   }
 
@@ -215,7 +277,9 @@ export function parseDatasetJson(json: string): CostDataset {
     'divisions',
     'employees',
     'projects',
+    'projectAssignments',
     'timeEntries',
+    'expenses',
     'directCosts',
     'indirectCosts',
   ];

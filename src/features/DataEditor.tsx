@@ -1,7 +1,14 @@
 import { Plus, RefreshCw, Trash2 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { currency } from '../domain/format';
-import type { CostDataset } from '../domain/types';
+import { useState } from 'react';
+import type {
+  CostDataset,
+  Employee,
+  ExpenseLedger,
+  Project,
+  ProjectAssignment,
+  TimeEntry,
+} from '../domain/types';
 import { CsvExchangePanel } from './CsvExchangePanel';
 import { useCostingStore } from '../store/useCostingStore';
 
@@ -9,41 +16,200 @@ type DataEditorProps = {
   dataset: CostDataset;
 };
 
+type DataTab = 'labor' | 'projects' | 'daily' | 'costs' | 'exchange';
+type SortDirection = 'asc' | 'desc';
+type SortState = {
+  table: DataTab;
+  key: string;
+  direction: SortDirection;
+};
+
+const dataTabs: Array<{ id: DataTab; label: string; description: string }> = [
+  { id: 'labor', label: '인건비', description: '사번, 급여, 수당 관리' },
+  { id: 'projects', label: '프로젝트', description: '인력별 프로젝트 투입기간' },
+  { id: 'daily', label: 'Daily Report', description: '일자별 투입시간' },
+  { id: 'costs', label: '직접비/공통비', description: '비용 원장 관리' },
+  { id: 'exchange', label: 'CSV/JSON', description: '가져오기/내보내기' },
+];
+
 export function DataEditor({ dataset }: DataEditorProps) {
+  const [activeTab, setActiveTab] = useState<DataTab>('labor');
+  const [sortState, setSortState] = useState<SortState>({
+    table: 'labor',
+    key: 'employeeNo',
+    direction: 'asc',
+  });
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const {
     resetDataset,
-    addProject,
-    deleteProject,
-    updateProjectRevenue,
-    updateProjectAllocationWeight,
+    updateDatasetPart,
     addEmployee,
     deleteEmployee,
-    updateEmployeeRate,
     addTimeEntry,
     deleteTimeEntry,
-    updateTimeEntryHours,
-    addDirectCost,
-    deleteDirectCost,
-    updateDirectCost,
-    addIndirectCost,
-    deleteIndirectCost,
-    updateIndirectCost,
-    updateIndirectCostDivision,
   } = useCostingStore();
+
+  const updateEmployee = (employeeId: string, patch: Partial<Employee>) => {
+    updateDatasetPart(
+      'employees',
+      dataset.employees.map((employee) =>
+        employee.id === employeeId ? { ...employee, ...patch } : employee,
+      ),
+    );
+  };
+
+  const updateProject = (projectId: string, patch: Partial<Project>) => {
+    updateDatasetPart(
+      'projects',
+      dataset.projects.map((project) =>
+        project.id === projectId ? { ...project, ...patch } : project,
+      ),
+    );
+  };
+
+  const updateAssignment = (assignmentId: string, patch: Partial<ProjectAssignment>) => {
+    updateDatasetPart(
+      'projectAssignments',
+      dataset.projectAssignments.map((assignment) =>
+        assignment.id === assignmentId ? { ...assignment, ...patch } : assignment,
+      ),
+    );
+  };
+
+  const updateTimeEntry = (entryId: string, patch: Partial<TimeEntry>) => {
+    updateDatasetPart(
+      'timeEntries',
+      dataset.timeEntries.map((entry) => (entry.id === entryId ? { ...entry, ...patch } : entry)),
+    );
+  };
+
+  const updateExpense = (expenseId: string, patch: Partial<ExpenseLedger>) => {
+    updateDatasetPart(
+      'expenses',
+      dataset.expenses.map((expense) =>
+        expense.id === expenseId ? { ...expense, ...patch } : expense,
+      ),
+    );
+  };
+
+  const addExpense = () => {
+    updateDatasetPart('expenses', [
+      {
+        id: `exp-custom-${Date.now()}`,
+        expenseDate: new Date().toISOString().slice(0, 10),
+        projectId: dataset.projects[0]?.id,
+        expenseType: '직접경비',
+        amount: 1000000,
+        description: '신규 지출',
+      },
+      ...dataset.expenses,
+    ]);
+  };
+
+  const deleteExpense = (expenseId: string) => {
+    updateDatasetPart(
+      'expenses',
+      dataset.expenses.filter((expense) => expense.id !== expenseId),
+    );
+  };
+
+  const addAssignment = () => {
+    const employeeId = dataset.employees[0]?.id;
+    const projectId = dataset.projects[0]?.id;
+    if (!employeeId || !projectId) return;
+    updateDatasetPart('projectAssignments', [
+      {
+        id: `pa-custom-${Date.now()}`,
+        employeeId,
+        projectId,
+        startDate: '2026-04-01',
+        endDate: '2026-06-30',
+      },
+      ...dataset.projectAssignments,
+    ]);
+  };
+
+  const deleteAssignment = (assignmentId: string) => {
+    updateDatasetPart(
+      'projectAssignments',
+      dataset.projectAssignments.filter((assignment) => assignment.id !== assignmentId),
+    );
+  };
+
+  const requestSort = (table: DataTab, key: string) => {
+    setSortState((current) => ({
+      table,
+      key,
+      direction:
+        current.table === table && current.key === key && current.direction === 'asc'
+          ? 'desc'
+          : 'asc',
+    }));
+  };
+
+  const handleResetDataset = () => {
+    resetDataset();
+    setIsResetModalOpen(true);
+  };
+
+  const sortedEmployees = sortRows(dataset.employees, sortState, 'labor', (employee) => ({
+    employeeNo: employee.employeeNo,
+    name: employee.name,
+    birthDate: employee.birthDate,
+    baseSalary: employee.baseSalary,
+    overtimeAllowance: employee.overtimeAllowance,
+    mealAllowance: employee.mealAllowance,
+    hourlyRate: employee.hourlyRate,
+  }));
+  const sortedAssignments = sortRows(dataset.projectAssignments, sortState, 'projects', (assignment) => {
+    const employee = dataset.employees.find((item) => item.id === assignment.employeeId);
+    const project = dataset.projects.find((item) => item.id === assignment.projectId);
+    return {
+      employeeNo: employee?.employeeNo,
+      empName: employee?.name,
+      projectCode: project?.projectCode,
+      projectName: project?.name,
+      startDate: assignment.startDate,
+      endDate: assignment.endDate,
+      revenue: project?.revenue,
+    };
+  });
+  const sortedTimeEntries = sortRows(dataset.timeEntries, sortState, 'daily', (entry) => {
+    const employee = dataset.employees.find((item) => item.id === entry.employeeId);
+    const project = dataset.projects.find((item) => item.id === entry.projectId);
+    return {
+      date: entry.date,
+      employeeNo: employee?.employeeNo,
+      projectCode: project?.projectCode,
+      hours: entry.hours,
+      manMonth: entry.hours / 160,
+    };
+  });
+  const sortedExpenses = sortRows(dataset.expenses, sortState, 'costs', (expense) => {
+    const project = dataset.projects.find((item) => item.id === expense.projectId);
+    return {
+      id: expense.id,
+      expenseDate: expense.expenseDate,
+      projectCode: project?.projectCode ?? '전사 공통',
+      expenseType: expense.expenseType,
+      amount: expense.amount,
+      description: expense.description,
+    };
+  });
 
   return (
     <section className="mx-auto max-w-7xl px-5 pb-6">
-      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-slate-200 p-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-base font-semibold text-slate-950">데이터 입력 및 수정</h2>
+            <h2 className="text-base font-semibold text-slate-950">데이터 관리</h2>
             <p className="text-sm text-slate-500">
-              DB 없이 브라우저 localStorage에 저장됩니다. 샘플과 다르면 초기화로 되돌릴 수 있습니다.
+              엑셀 원장처럼 데이터를 분리해 관리합니다. 변경값은 localStorage에 저장됩니다.
             </p>
           </div>
           <button
             type="button"
-            onClick={resetDataset}
+            onClick={handleResetDataset}
             className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             <RefreshCw size={16} aria-hidden="true" />
@@ -51,234 +217,523 @@ export function DataEditor({ dataset }: DataEditorProps) {
           </button>
         </div>
 
-        <div className="mb-5">
-          <CsvExchangePanel dataset={dataset} />
-        </div>
-
-        <div className="grid gap-5 xl:grid-cols-2">
-          <EditorPanel title="프로젝트 매출">
-            <PanelAction label="프로젝트 추가" onClick={addProject} />
-            <div className="max-h-80 overflow-y-auto overflow-x-hidden pr-1">
-              <div className="grid gap-2">
-                {dataset.projects.map((project) => (
-                  <div key={project.id} className="rounded-md border border-slate-100 p-2">
-                    <div className="mb-2 flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-slate-900">{project.name}</p>
-                        <p className="text-xs text-slate-500">
-                          {dataset.divisions.find((division) => division.id === project.divisionId)?.name}
-                        </p>
-                      </div>
-                      <IconButton label="프로젝트 삭제" onClick={() => deleteProject(project.id)} />
-                    </div>
-                    <div className="grid gap-2 sm:grid-cols-[1fr_120px]">
-                      <FieldLabel label="매출">
-                        <MoneyInput
-                          value={project.revenue}
-                          onChange={(value) => updateProjectRevenue(project.id, value)}
-                        />
-                      </FieldLabel>
-                      <FieldLabel label="배부 가중치">
-                        <NumberInput
-                          value={project.allocationWeight ?? 1}
-                          step={0.05}
-                          onChange={(value) => updateProjectAllocationWeight(project.id, value)}
-                        />
-                      </FieldLabel>
-                    </div>
-                  </div>
-                ))}
-              </div>
+        <div className="grid min-h-[620px] lg:grid-cols-[240px_1fr]">
+          <aside className="border-b border-slate-200 bg-slate-50 p-3 lg:border-b-0 lg:border-r">
+            <div className="grid gap-1">
+              {dataTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`rounded-md px-3 py-3 text-left transition ${
+                    activeTab === tab.id
+                      ? 'bg-white text-teal-700 shadow-sm ring-1 ring-slate-200'
+                      : 'text-slate-600 hover:bg-white'
+                  }`}
+                >
+                  <span className="block text-sm font-semibold">{tab.label}</span>
+                  <span className="mt-1 block text-xs text-slate-500">{tab.description}</span>
+                </button>
+              ))}
             </div>
-          </EditorPanel>
+          </aside>
 
-          <EditorPanel title="직원 시급">
-            <PanelAction label="직원 추가" onClick={addEmployee} />
-            <div className="max-h-80 overflow-y-auto overflow-x-hidden pr-1">
-              <div className="grid gap-2">
-                {dataset.employees.map((employee) => (
-                  <div
-                    key={employee.id}
-                    className="grid gap-2 rounded-md border border-slate-100 p-2 sm:grid-cols-[1fr_160px_32px]"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-slate-900">{employee.name}</p>
-                      <p className="text-xs text-slate-500">
-                        {dataset.divisions.find((division) => division.id === employee.divisionId)?.name}
-                      </p>
-                    </div>
-                    <FieldLabel label="시급">
-                      <MoneyInput
-                        value={employee.hourlyRate}
-                        step={1000}
-                        onChange={(value) => updateEmployeeRate(employee.id, value)}
-                      />
-                    </FieldLabel>
-                    <div className="flex items-end">
-                      <IconButton label="직원 삭제" onClick={() => deleteEmployee(employee.id)} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </EditorPanel>
+          <div className="min-w-0 p-4">
+            {activeTab === 'labor' && (
+              <TablePanel title="인건비" actionLabel="직원 추가" onAction={addEmployee}>
+                <div className="overflow-x-auto">
+                  <table className="min-w-[980px] w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-slate-100 text-left text-slate-600">
+                        <Header>No</Header>
+                        <Header sortKey="employeeNo" table="labor" sortState={sortState} onSort={requestSort}>사번</Header>
+                        <Header sortKey="name" table="labor" sortState={sortState} onSort={requestSort}>이름</Header>
+                        <Header sortKey="birthDate" table="labor" sortState={sortState} onSort={requestSort}>생년월일</Header>
+                        <Header sortKey="baseSalary" table="labor" sortState={sortState} onSort={requestSort}>기본급</Header>
+                        <Header sortKey="overtimeAllowance" table="labor" sortState={sortState} onSort={requestSort}>연장근로수당</Header>
+                        <Header sortKey="mealAllowance" table="labor" sortState={sortState} onSort={requestSort}>식대</Header>
+                        <Header sortKey="hourlyRate" table="labor" sortState={sortState} onSort={requestSort}>시급</Header>
+                        <Header></Header>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedEmployees.map((employee, index) => (
+                        <tr key={employee.id} className="border-b border-slate-100">
+                          <Cell>{index + 1}</Cell>
+                          <Cell>
+                            <TextInput
+                              value={employee.employeeNo ?? ''}
+                              onChange={(employeeNo) => updateEmployee(employee.id, { employeeNo })}
+                            />
+                          </Cell>
+                          <Cell>
+                            <TextInput
+                              value={employee.name}
+                              onChange={(name) => updateEmployee(employee.id, { name })}
+                            />
+                          </Cell>
+                          <Cell>
+                            <TextInput
+                              type="date"
+                              value={employee.birthDate ?? ''}
+                              onChange={(birthDate) => updateEmployee(employee.id, { birthDate })}
+                            />
+                          </Cell>
+                          <Cell>
+                            <MoneyInput
+                              value={employee.baseSalary ?? 0}
+                              onChange={(baseSalary) => updateEmployee(employee.id, { baseSalary })}
+                            />
+                          </Cell>
+                          <Cell>
+                            <MoneyInput
+                              value={employee.overtimeAllowance ?? 0}
+                              onChange={(overtimeAllowance) =>
+                                updateEmployee(employee.id, { overtimeAllowance })
+                              }
+                            />
+                          </Cell>
+                          <Cell>
+                            <MoneyInput
+                              value={employee.mealAllowance ?? 0}
+                              onChange={(mealAllowance) => updateEmployee(employee.id, { mealAllowance })}
+                            />
+                          </Cell>
+                          <Cell>
+                            <MoneyInput
+                              value={employee.hourlyRate}
+                              onChange={(hourlyRate) => updateEmployee(employee.id, { hourlyRate })}
+                            />
+                          </Cell>
+                          <Cell>
+                            <IconButton label="직원 삭제" onClick={() => deleteEmployee(employee.id)} />
+                          </Cell>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </TablePanel>
+            )}
 
-          <EditorPanel title="대표 Time-sheet">
-            <PanelAction label="투입 시간 추가" onClick={addTimeEntry} />
-            <div className="max-h-80 overflow-y-auto overflow-x-hidden pr-1">
-              <div className="grid gap-2">
-                {dataset.timeEntries.slice(0, 30).map((entry) => (
-                  <div
-                    key={`${entry.employeeId}-${entry.projectId}`}
-                    className="grid gap-2 rounded-md border border-slate-100 p-2 sm:grid-cols-[1fr_110px_32px]"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-slate-900">
-                        {dataset.projects.find((project) => project.id === entry.projectId)?.name}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {dataset.employees.find((employee) => employee.id === entry.employeeId)?.name}
-                      </p>
-                    </div>
-                    <FieldLabel label="투입 시간">
-                      <NumberInput
-                        value={entry.hours}
-                        onChange={(value) =>
-                          updateTimeEntryHours(entry.employeeId, entry.projectId, value)
-                        }
-                      />
-                    </FieldLabel>
-                    <div className="flex items-end">
-                      <IconButton
-                        label="투입 시간 삭제"
-                        onClick={() => deleteTimeEntry(entry.employeeId, entry.projectId)}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </EditorPanel>
+            {activeTab === 'projects' && (
+              <TablePanel title="프로젝트" actionLabel="프로젝트 배정 추가" onAction={addAssignment}>
+                <div className="overflow-x-auto">
+                  <table className="min-w-[980px] w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-slate-100 text-left text-slate-600">
+                        <Header>No</Header>
+                        <Header sortKey="employeeNo" table="projects" sortState={sortState} onSort={requestSort}>사번</Header>
+                        <Header sortKey="empName" table="projects" sortState={sortState} onSort={requestSort}>이름</Header>
+                        <Header sortKey="projectCode" table="projects" sortState={sortState} onSort={requestSort}>프로젝트코드</Header>
+                        <Header sortKey="projectName" table="projects" sortState={sortState} onSort={requestSort}>프로젝트명</Header>
+                        <Header sortKey="startDate" table="projects" sortState={sortState} onSort={requestSort}>투입일</Header>
+                        <Header sortKey="endDate" table="projects" sortState={sortState} onSort={requestSort}>종료일</Header>
+                        <Header sortKey="revenue" table="projects" sortState={sortState} onSort={requestSort}>매출</Header>
+                        <Header></Header>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedAssignments.map((assignment, index) => {
+                        const employee = dataset.employees.find((item) => item.id === assignment.employeeId);
+                        const project = dataset.projects.find((item) => item.id === assignment.projectId);
+                        return (
+                          <tr key={assignment.id} className="border-b border-slate-100">
+                            <Cell>{index + 1}</Cell>
+                            <Cell>{employee?.employeeNo}</Cell>
+                            <Cell>{employee?.name}</Cell>
+                            <Cell>
+                              <TextInput
+                                value={project?.projectCode ?? ''}
+                                onChange={(projectCode) =>
+                                  project && updateProject(project.id, { projectCode })
+                                }
+                              />
+                            </Cell>
+                            <Cell>
+                              <TextInput
+                                value={project?.name ?? ''}
+                                onChange={(name) => project && updateProject(project.id, { name })}
+                              />
+                            </Cell>
+                            <Cell>
+                              <TextInput
+                                type="date"
+                                value={assignment.startDate}
+                                onChange={(startDate) => updateAssignment(assignment.id, { startDate })}
+                              />
+                            </Cell>
+                            <Cell>
+                              <TextInput
+                                type="date"
+                                value={assignment.endDate}
+                                onChange={(endDate) => updateAssignment(assignment.id, { endDate })}
+                              />
+                            </Cell>
+                            <Cell>
+                              <MoneyInput
+                                value={project?.revenue ?? 0}
+                                onChange={(revenue) => project && updateProject(project.id, { revenue })}
+                              />
+                            </Cell>
+                            <Cell>
+                              <IconButton
+                                label="배정 삭제"
+                                onClick={() => deleteAssignment(assignment.id)}
+                              />
+                            </Cell>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </TablePanel>
+            )}
 
-          <EditorPanel title="직접비 및 공통비">
-            <div className="grid gap-4 lg:grid-cols-2">
-              <div>
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <p className="text-sm font-medium text-slate-700">직접비</p>
-                  <PanelAction label="직접비 추가" onClick={addDirectCost} compact />
+            {activeTab === 'daily' && (
+              <TablePanel title="프로젝트별 인력 투입시간 (Daily Report)" actionLabel="투입 시간 추가" onAction={addTimeEntry}>
+                <div className="mb-3 rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                  M/M 기준: 1 M/M = 160시간
                 </div>
-                <div className="max-h-64 overflow-y-auto overflow-x-hidden pr-1">
-                  {dataset.directCosts.map((cost) => (
-                    <div key={cost.id} className="mb-2 rounded-md border border-slate-100 p-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <CostLine
-                          label={`${cost.label} · ${
-                            dataset.projects.find((project) => project.id === cost.projectId)?.name
-                          }`}
-                          amount={cost.amount}
-                          onChange={(value) => updateDirectCost(cost.id, value)}
-                        />
-                        <IconButton label="직접비 삭제" onClick={() => deleteDirectCost(cost.id)} />
-                      </div>
-                    </div>
-                  ))}
+                <div className="overflow-x-auto">
+                  <table className="min-w-[820px] w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-slate-100 text-left text-slate-600">
+                        <Header>NO</Header>
+                        <Header sortKey="date" table="daily" sortState={sortState} onSort={requestSort}>일자</Header>
+                        <Header sortKey="employeeNo" table="daily" sortState={sortState} onSort={requestSort}>사번</Header>
+                        <Header sortKey="projectCode" table="daily" sortState={sortState} onSort={requestSort}>프로젝트코드</Header>
+                        <Header sortKey="hours" table="daily" sortState={sortState} onSort={requestSort}>근무시간</Header>
+                        <Header sortKey="manMonth" table="daily" sortState={sortState} onSort={requestSort}>M/M</Header>
+                        <Header></Header>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedTimeEntries.map((entry, index) => {
+                        const employee = dataset.employees.find((item) => item.id === entry.employeeId);
+                        const project = dataset.projects.find((item) => item.id === entry.projectId);
+                        const entryId = entry.id ?? `${entry.employeeId}-${entry.projectId}-${index}`;
+                        return (
+                          <tr key={entryId} className="border-b border-slate-100">
+                            <Cell>{index + 1}</Cell>
+                            <Cell>
+                              <TextInput
+                                type="date"
+                                value={entry.date ?? ''}
+                                onChange={(date) => updateTimeEntry(entryId, { date })}
+                              />
+                            </Cell>
+                            <Cell>{employee?.employeeNo}</Cell>
+                            <Cell>{project?.projectCode}</Cell>
+                            <Cell>
+                              <NumberInput
+                                value={entry.hours}
+                                onChange={(hours) => updateTimeEntry(entryId, { hours })}
+                              />
+                            </Cell>
+                            <Cell>{(entry.hours / 160).toFixed(3)}</Cell>
+                            <Cell>
+                              <IconButton
+                                label="투입 시간 삭제"
+                                onClick={() =>
+                                  updateDatasetPart(
+                                    'timeEntries',
+                                    dataset.timeEntries.filter((item) => item.id !== entryId),
+                                  )
+                                }
+                              />
+                            </Cell>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
-              </div>
-              <div>
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <p className="text-sm font-medium text-slate-700">공통비</p>
-                  <PanelAction label="공통비 추가" onClick={addIndirectCost} compact />
+              </TablePanel>
+            )}
+
+            {activeTab === 'costs' && (
+              <TablePanel title="Expense_Ledger" actionLabel="지출 추가" onAction={addExpense}>
+                <div className="overflow-x-auto">
+                  <table className="min-w-[980px] w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-slate-100 text-left text-slate-600">
+                        <Header>No</Header>
+                        <Header sortKey="id" table="costs" sortState={sortState} onSort={requestSort}>지출 ID</Header>
+                        <Header sortKey="expenseDate" table="costs" sortState={sortState} onSort={requestSort}>지출일</Header>
+                        <Header sortKey="projectCode" table="costs" sortState={sortState} onSort={requestSort}>프로젝트 코드</Header>
+                        <Header sortKey="expenseType" table="costs" sortState={sortState} onSort={requestSort}>비용 구분</Header>
+                        <Header sortKey="amount" table="costs" sortState={sortState} onSort={requestSort}>금액</Header>
+                        <Header sortKey="description" table="costs" sortState={sortState} onSort={requestSort}>내역</Header>
+                        <Header></Header>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedExpenses.map((expense, index) => {
+                        const project = dataset.projects.find((item) => item.id === expense.projectId);
+                        return (
+                          <tr key={expense.id} className="border-b border-slate-100">
+                            <Cell>{index + 1}</Cell>
+                            <Cell>{expense.id}</Cell>
+                            <Cell>
+                              <TextInput
+                                type="date"
+                                value={expense.expenseDate}
+                                onChange={(expenseDate) => updateExpense(expense.id, { expenseDate })}
+                              />
+                            </Cell>
+                            <Cell>
+                              <select
+                                className="h-9 w-full min-w-[150px] border border-slate-300 bg-white px-2"
+                                value={expense.projectId ?? ''}
+                                onChange={(event) =>
+                                  updateExpense(expense.id, {
+                                    projectId: event.target.value === '' ? undefined : event.target.value,
+                                  })
+                                }
+                              >
+                                <option value="">전사 공통</option>
+                                {dataset.projects.map((item) => (
+                                  <option key={item.id} value={item.id}>
+                                    {item.projectCode}
+                                  </option>
+                                ))}
+                              </select>
+                            </Cell>
+                            <Cell>
+                              <select
+                                className="h-9 w-full min-w-[120px] border border-slate-300 bg-white px-2"
+                                value={expense.expenseType}
+                                onChange={(event) =>
+                                  updateExpense(expense.id, {
+                                    expenseType: event.target.value as ExpenseLedger['expenseType'],
+                                  })
+                                }
+                              >
+                                <option value="직접경비">직접경비</option>
+                                <option value="외주비">외주비</option>
+                                <option value="판관비">판관비</option>
+                              </select>
+                            </Cell>
+                            <Cell>
+                              <MoneyInput
+                                value={expense.amount}
+                                onChange={(amount) => updateExpense(expense.id, { amount })}
+                              />
+                            </Cell>
+                            <Cell>
+                              <TextInput
+                                value={expense.description || project?.name || ''}
+                                onChange={(description) => updateExpense(expense.id, { description })}
+                              />
+                            </Cell>
+                            <Cell>
+                              <IconButton label="지출 삭제" onClick={() => deleteExpense(expense.id)} />
+                            </Cell>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
-                <div className="max-h-64 overflow-y-auto overflow-x-hidden pr-1">
-                  {dataset.indirectCosts.map((cost) => (
-                    <div key={cost.id} className="mb-2 rounded-md border border-slate-100 p-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <CostLine
-                          label={cost.label}
-                          amount={cost.amount}
-                          onChange={(value) => updateIndirectCost(cost.id, value)}
-                        />
-                        <IconButton label="공통비 삭제" onClick={() => deleteIndirectCost(cost.id)} />
-                      </div>
-                      <label className="grid gap-1 text-sm">
-                        <span className="text-slate-600">공통비 풀</span>
-                        <select
-                          className="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm"
-                          value={cost.divisionId ?? ''}
-                          onChange={(event) =>
-                            updateIndirectCostDivision(
-                              cost.id,
-                              event.target.value === '' ? undefined : event.target.value,
-                            )
-                          }
-                        >
-                          <option value="">전사 공통</option>
-                          {dataset.divisions.map((division) => (
-                            <option key={division.id} value={division.id}>
-                              {division.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </EditorPanel>
+              </TablePanel>
+            )}
+
+            {activeTab === 'exchange' && <CsvExchangePanel dataset={dataset} />}
+          </div>
         </div>
       </div>
+      {isResetModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4">
+          <div className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-5 shadow-xl">
+            <h3 className="text-base font-semibold text-slate-950">초기화 완료</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              샘플 데이터, 배부 기준, 시뮬레이션, 저장 시나리오를 기본값으로 되돌렸습니다.
+            </p>
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsResetModalOpen(false)}
+                className="h-9 rounded-md bg-teal-700 px-4 text-sm font-medium text-white hover:bg-teal-800"
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
 
-function EditorPanel({ title, children }: { title: string; children: ReactNode }) {
+function TablePanel({
+  title,
+  actionLabel,
+  onAction,
+  children,
+}: {
+  title: string;
+  actionLabel?: string;
+  onAction?: () => void;
+  children: ReactNode;
+}) {
   return (
-    <div className="rounded-md border border-slate-200 p-3">
-      <h3 className="mb-3 text-sm font-semibold text-slate-900">{title}</h3>
+    <div>
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <h3 className="text-sm font-semibold text-slate-950">{title}</h3>
+        {actionLabel && onAction && (
+          <button
+            type="button"
+            onClick={onAction}
+            className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            <Plus size={15} aria-hidden="true" />
+            {actionLabel}
+          </button>
+        )}
+      </div>
       {children}
     </div>
   );
 }
 
-function CostLine({
-  label,
-  amount,
-  onChange,
+function Header({
+  children,
+  sortKey,
+  table,
+  sortState,
+  onSort,
 }: {
-  label: string;
-  amount: number;
-  onChange: (value: number) => void;
+  children?: ReactNode;
+  sortKey?: string;
+  table?: DataTab;
+  sortState?: SortState;
+  onSort?: (table: DataTab, key: string) => void;
 }) {
+  const active = Boolean(
+    sortKey && table && sortState?.table === table && sortState.key === sortKey,
+  );
+
   return (
-    <label className="mb-2 grid flex-1 gap-2 text-sm">
-      <span className="line-clamp-1 text-slate-600">{label}</span>
-      <MoneyInput value={amount} onChange={onChange} />
-    </label>
+    <th className="h-9 whitespace-nowrap border border-slate-200 px-2 font-semibold">
+      {sortKey && table && onSort ? (
+        <button
+          type="button"
+          onClick={() => onSort(table, sortKey)}
+          className="flex w-full items-center justify-between gap-2 text-left"
+        >
+          <span>{children}</span>
+          <span className="text-xs text-slate-400">
+            {active ? (sortState?.direction === 'asc' ? '▲' : '▼') : '↕'}
+          </span>
+        </button>
+      ) : (
+        children
+      )}
+    </th>
   );
 }
 
-function PanelAction({
-  label,
-  compact,
-  onClick,
+function Cell({ children }: { children?: ReactNode }) {
+  return (
+    <td className="h-10 whitespace-nowrap border border-slate-200 px-2 align-middle">
+      {children}
+    </td>
+  );
+}
+
+function TextInput({
+  value,
+  type = 'text',
+  onChange,
 }: {
-  label: string;
-  compact?: boolean;
-  onClick: () => void;
+  value: string;
+  type?: string;
+  onChange: (value: string) => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`mb-3 inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 ${
-        compact ? 'h-8 px-2' : 'h-9 px-3'
-      }`}
-    >
-      <Plus size={15} aria-hidden="true" />
-      {label}
-    </button>
+    <input
+      className="h-9 w-full min-w-[110px] border border-slate-300 px-2"
+      type={type}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    />
   );
+}
+
+function NumberInput({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <input
+      className="h-9 w-full min-w-[110px] border border-slate-300 px-2 text-right"
+      type="number"
+      value={Math.round(value)}
+      onChange={(event) => onChange(Number(event.target.value))}
+    />
+  );
+}
+
+function MoneyInput({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <div className="relative">
+      <input
+      className="h-9 w-full min-w-[130px] border border-slate-300 px-2 pr-8 text-right tabular-nums"
+        inputMode="numeric"
+        value={formatNumber(value)}
+        onChange={(event) => onChange(parseNumber(event.target.value))}
+      />
+      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-500">
+        원
+      </span>
+    </div>
+  );
+}
+
+function sortRows<Row>(
+  rows: Row[],
+  sortState: SortState,
+  table: DataTab,
+  getValues: (row: Row) => Record<string, string | number | undefined>,
+) {
+  if (sortState.table !== table) return rows;
+
+  return [...rows].sort((a, b) => {
+    const aValue = getValues(a)[sortState.key];
+    const bValue = getValues(b)[sortState.key];
+    const result = compareValues(aValue, bValue);
+    return sortState.direction === 'asc' ? result : -result;
+  });
+}
+
+function compareValues(aValue: string | number | undefined, bValue: string | number | undefined) {
+  if (typeof aValue === 'number' || typeof bValue === 'number') {
+    return Number(aValue ?? 0) - Number(bValue ?? 0);
+  }
+
+  return String(aValue ?? '').localeCompare(String(bValue ?? ''), 'ko-KR', {
+    numeric: true,
+  });
+}
+
+function formatNumber(value: number) {
+  return Math.round(value || 0).toLocaleString('ko-KR');
+}
+
+function parseNumber(value: string) {
+  const parsed = Number(value.replace(/,/g, '').replace(/[^\d.-]/g, ''));
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function IconButton({ label, onClick }: { label: string; onClick: () => void }) {
@@ -292,57 +747,5 @@ function IconButton({ label, onClick }: { label: string; onClick: () => void }) 
     >
       <Trash2 size={15} aria-hidden="true" />
     </button>
-  );
-}
-
-function FieldLabel({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="grid gap-1 text-sm">
-      <span className="text-xs font-medium text-slate-500">{label}</span>
-      {children}
-    </label>
-  );
-}
-
-function MoneyInput({
-  value,
-  step = 100000,
-  onChange,
-}: {
-  value: number;
-  step?: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <input
-      className="h-9 w-full rounded-md border border-slate-300 px-2 text-sm"
-      min={0}
-      step={step}
-      type="number"
-      value={Math.round(value)}
-      title={currency.format(value)}
-      onChange={(event) => onChange(Number(event.target.value))}
-    />
-  );
-}
-
-function NumberInput({
-  value,
-  step = 1,
-  onChange,
-}: {
-  value: number;
-  step?: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <input
-      className="h-9 w-full rounded-md border border-slate-300 px-2 text-sm"
-      min={0}
-      step={step}
-      type="number"
-      value={value}
-      onChange={(event) => onChange(Number(event.target.value))}
-    />
   );
 }

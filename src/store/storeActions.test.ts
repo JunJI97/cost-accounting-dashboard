@@ -35,4 +35,19 @@ describe('costing store data actions', () => {
 
     expect(useCostingStore.getState().simulation.revenueDelta).toBe(3000000);
   });
+
+  it('resets sample data, allocation basis, simulation, and saved scenarios', () => {
+    useCostingStore.getState().setAllocationBasis('revenue');
+    useCostingStore.getState().setSimulation({ revenueDelta: 3000000 });
+    useCostingStore.getState().saveScenario();
+    useCostingStore.getState().addProject();
+
+    useCostingStore.getState().resetDataset();
+
+    const state = useCostingStore.getState();
+    expect(state.dataset.projects).toHaveLength(20);
+    expect(state.allocationBasis).toBe('laborHours');
+    expect(state.simulation.revenueDelta).toBe(0);
+    expect(state.savedScenarios).toHaveLength(0);
+  });
 });

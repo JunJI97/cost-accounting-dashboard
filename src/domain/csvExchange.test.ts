@@ -30,6 +30,33 @@ describe('csv exchange', () => {
     });
   });
 
+  it('detects project assignment csv', () => {
+    const result = parseDatasetCsv(
+      'id,employeeId,projectId,startDate,endDate\npa-1,emp-1,prj-1,2026-01-01,2026-06-30',
+      seedData,
+    );
+
+    expect(result.key).toBe('projectAssignments');
+    expect(result.rows[0]).toMatchObject({
+      id: 'pa-1',
+      startDate: '2026-01-01',
+    });
+  });
+
+  it('detects expense ledger csv', () => {
+    const result = parseDatasetCsv(
+      'id,expenseDate,projectId,expenseType,amount,description\nexp-1,2026-04-01,prj-1,외주비,2000000,외주 개발',
+      seedData,
+    );
+
+    expect(result.key).toBe('expenses');
+    expect(result.rows[0]).toMatchObject({
+      id: 'exp-1',
+      expenseType: '외주비',
+      amount: 2000000,
+    });
+  });
+
   it('rejects unknown project references when a dataset is provided', () => {
     expect(() =>
       parseDatasetCsv('employeeId,projectId,hours\nemp-1,missing-project,42', seedData),

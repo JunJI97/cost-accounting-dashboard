@@ -6,6 +6,7 @@ import type {
 } from './types';
 
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
+export const HOURS_PER_MAN_MONTH = 160;
 
 export function calculateProjectProfitability(
   dataset: CostDataset,
@@ -17,30 +18,30 @@ export function calculateProjectProfitability(
   const baseRows = dataset.projects.map((project) => {
     const entries = dataset.timeEntries.filter((entry) => entry.projectId === project.id);
     const laborHours = sum(entries.map((entry) => entry.hours));
-    const laborCost = sum(
+    const internalLaborCost = sum(
       entries.map((entry) => {
         const employee = employeeById.get(entry.employeeId);
         return employee ? employee.hourlyRate * entry.hours : 0;
       }),
     );
-    const directCost = sum(
-      dataset.directCosts
-        .filter((cost) => cost.projectId === project.id)
-        .map((cost) => cost.amount),
-    );
+    const { directExpenseCost, outsourcingCost } = getProjectExpenseBreakdown(dataset, project.id);
+    const directCost = directExpenseCost + outsourcingCost;
 
     return {
       project,
       divisionName: divisionById.get(project.divisionId)?.name ?? '미지정',
       laborHours,
-      laborCost,
+      laborCost: internalLaborCost,
+      internalLaborCost,
+      outsourcingCost,
+      directExpenseCost,
       directCost,
     };
   });
 
   const allocatedIndirectCostByProject = new Map<string, number>();
 
-  for (const cost of dataset.indirectCosts) {
+  for (const cost of getCommonExpenses(dataset)) {
     const eligibleRows = cost.divisionId
       ? baseRows.filter((row) => row.project.divisionId === cost.divisionId)
       : baseRows;
@@ -71,15 +72,61 @@ export function calculateProjectProfitability(
       divisionName: row.divisionName,
       revenue: row.project.revenue,
       laborHours: row.laborHours,
+      manMonths: row.laborHours / HOURS_PER_MAN_MONTH,
+      internalLaborCost: row.internalLaborCost,
       laborCost: row.laborCost,
+      outsourcingCost: row.outsourcingCost,
+      directExpenseCost: row.directExpenseCost,
       directCost: row.directCost,
       allocatedIndirectCost,
       totalCost,
       netProfit,
       margin,
-      primaryDriver: getPrimaryDriver(row.laborCost, row.directCost, allocatedIndirectCost),
+      primaryDriver: getPrimaryDriver(
+        row.internalLaborCost,
+        row.outsourcingCost,
+        row.directExpenseCost,
+        allocatedIndirectCost,
+      ),
     };
   });
+}
+
+function getProjectExpenseBreakdown(dataset: CostDataset, projectId: string) {
+  if (dataset.expenses?.length) {
+    return dataset.expenses
+      .filter((expense) => expense.projectId === projectId)
+      .reduce(
+        (acc, expense) => {
+          if (expense.expenseType === '외주비') {
+            acc.outsourcingCost += expense.amount;
+          } else {
+            acc.directExpenseCost += expense.amount;
+          }
+          return acc;
+        },
+        { directExpenseCost: 0, outsourcingCost: 0 },
+      );
+  }
+
+  return {
+    directExpenseCost: sum(
+      dataset.directCosts
+        .filter((cost) => cost.projectId === projectId)
+        .map((cost) => cost.amount),
+    ),
+    outsourcingCost: 0,
+  };
+}
+
+function getCommonExpenses(dataset: CostDataset) {
+  if (dataset.expenses?.length) {
+    return dataset.expenses
+      .filter((expense) => !expense.projectId)
+      .map((expense) => ({ amount: expense.amount, divisionId: undefined }));
+  }
+
+  return dataset.indirectCosts;
 }
 
 function getWeightedBasis(
@@ -130,8 +177,21 @@ export function simulateAdditionalStaff(
         hours: input.additionalPeople * input.hoursPerPerson,
       },
     ],
+    expenses:
+      dataset.expenses?.length && input.indirectCostDelta !== 0
+        ? [
+            ...dataset.expenses,
+            {
+              id: 'scenario-indirect-expense',
+              expenseDate: new Date().toISOString().slice(0, 10),
+              expenseType: '판관비',
+              amount: input.indirectCostDelta,
+              description: '시뮬레이션 공통비 조정',
+            },
+          ]
+        : dataset.expenses,
     indirectCosts:
-      input.indirectCostDelta === 0
+      input.indirectCostDelta === 0 || dataset.expenses?.length
         ? dataset.indirectCosts
         : [
             ...dataset.indirectCosts,
@@ -147,7 +207,10 @@ export function simulateAdditionalStaff(
 export function summarize(rows: ProjectProfitability[]) {
   return {
     revenue: sum(rows.map((row) => row.revenue)),
+    internalLaborCost: sum(rows.map((row) => row.internalLaborCost)),
     laborCost: sum(rows.map((row) => row.laborCost)),
+    outsourcingCost: sum(rows.map((row) => row.outsourcingCost)),
+    directExpenseCost: sum(rows.map((row) => row.directExpenseCost)),
     directCost: sum(rows.map((row) => row.directCost)),
     allocatedIndirectCost: sum(rows.map((row) => row.allocatedIndirectCost)),
     totalCost: sum(rows.map((row) => row.totalCost)),
@@ -156,13 +219,15 @@ export function summarize(rows: ProjectProfitability[]) {
 }
 
 function getPrimaryDriver(
-  laborCost: number,
-  directCost: number,
+  internalLaborCost: number,
+  outsourcingCost: number,
+  directExpenseCost: number,
   allocatedIndirectCost: number,
 ) {
   const drivers = [
-    { label: '인건비', value: laborCost },
-    { label: '직접비', value: directCost },
+    { label: '내부 인건비', value: internalLaborCost },
+    { label: '외주 용역비', value: outsourcingCost },
+    { label: '직접경비', value: directExpenseCost },
     { label: '공통비 배부', value: allocatedIndirectCost },
   ];
   return drivers.sort((a, b) => b.value - a.value)[0].label;
