@@ -102,18 +102,31 @@ export function ReportSummary({ rows }: { rows: ProjectProfitability[] }) {
   const lowMarginProjects = rows.filter((row) => row.margin < 0.1).length;
   const outsourcingRatio = ratio(totals.outsourcingCost, totals.totalCost);
   const internalLaborRatio = ratio(totals.internalLaborCost, totals.totalCost);
-  const insightComments = [
-    `본부별 수익성 기준으로 ${bestDivision.divisionName}가 이익률 ${percent(
-      ratio(bestDivision.netProfit, bestDivision.revenue),
-    )}로 가장 효율적입니다. 매출 대비 순이익 전환율이 높아 현재 배부 기준에서도 우수한 수익 구조를 보입니다.`,
-    `${laborHeavyDivision.divisionName}는 총원가 중 내부 인건비 비중이 ${percent(
-      ratio(laborHeavyDivision.internalLaborCost, laborHeavyDivision.totalCost),
-    )}로 높습니다. 투입 공수, 역할별 단가, 프로젝트별 M/M 계획 대비 실적을 우선 점검하는 것이 좋습니다.`,
-    `${outsourcingHeavyDivision.divisionName}는 외주 용역비 비중이 ${percent(
-      ratio(outsourcingHeavyDivision.outsourcingCost, outsourcingHeavyDivision.totalCost),
-    )}로 가장 높습니다. 외주 범위와 단가 계약을 분리 관리하면 SI 기업형 원가 통제 포인트가 명확해집니다.`,
-    `${highOutsourcing.projectName}는 프로젝트 단위에서 외주 용역비 부담이 가장 큽니다. 매출 규모 대비 외주 투입 효과를 별도 KPI로 추적할 필요가 있습니다.`,
-    `${lowMarginProjects}개 프로젝트는 이익률 10% 미만입니다. 이 구간은 견적 단가, 추가 투입 시간, 외주비 정산 조건을 묶어서 재검토하는 것이 좋습니다.`,
+  const insightComments: Array<{ text: string; boldTerms?: string[] }> = [
+    {
+      text: `본부별 수익성 기준으로 ${bestDivision.divisionName}가 이익률 ${percent(
+        ratio(bestDivision.netProfit, bestDivision.revenue),
+      )}로 가장 효율적입니다. 매출 대비 순이익 전환율이 높아 현재 배부 기준에서도 우수한 수익 구조를 보입니다.`,
+      boldTerms: [bestDivision.divisionName],
+    },
+    {
+      text: `${laborHeavyDivision.divisionName}는 총원가 중 내부 인건비 비중이 ${percent(
+        ratio(laborHeavyDivision.internalLaborCost, laborHeavyDivision.totalCost),
+      )}로 높습니다. 투입 공수, 역할별 단가, 프로젝트별 M/M 계획 대비 실적을 우선 점검하는 것이 좋습니다.`,
+      boldTerms: [laborHeavyDivision.divisionName],
+    },
+    {
+      text: `${outsourcingHeavyDivision.divisionName}는 외주 용역비 비중이 ${percent(
+        ratio(outsourcingHeavyDivision.outsourcingCost, outsourcingHeavyDivision.totalCost),
+      )}로 가장 높습니다. 외주 범위와 단가 계약을 분리 관리하면 SI 기업형 원가 통제 포인트가 명확해집니다.`,
+      boldTerms: [outsourcingHeavyDivision.divisionName],
+    },
+    {
+      text: `${highOutsourcing.projectName}는 프로젝트 단위에서 외주 용역비 부담이 가장 큽니다. 매출 규모 대비 외주 투입 효과를 별도 KPI로 추적할 필요가 있습니다.`,
+    },
+    {
+      text: `${lowMarginProjects}개 프로젝트는 이익률 10% 미만입니다. 이 구간은 견적 단가, 추가 투입 시간, 외주비 정산 조건을 묶어서 재검토하는 것이 좋습니다.`,
+    },
   ];
 
   async function exportReportExcel() {
@@ -143,7 +156,7 @@ export function ReportSummary({ rows }: { rows: ProjectProfitability[] }) {
           sheet: 'AI 분석 코멘트',
           data: toSheetData(
             ['No', '코멘트'],
-            insightComments.map((comment, index) => [index + 1, comment]),
+            insightComments.map((comment, index) => [index + 1, comment.text]),
           ),
           columns: [{ width: 8 }, { width: 100 }],
         },
@@ -364,7 +377,7 @@ export function ReportSummary({ rows }: { rows: ProjectProfitability[] }) {
             <h3 className="text-sm font-semibold text-slate-900">AI 분석 코멘트</h3>
             <div className="mt-3 space-y-3 text-sm leading-6 text-slate-700">
               {insightComments.map((comment) => (
-                <p key={comment}>{comment}</p>
+                <p key={comment.text}>{renderBoldTerms(comment.text, comment.boldTerms)}</p>
               ))}
             </div>
           </div>
@@ -530,6 +543,26 @@ function ProjectInsightRow({ row }: { row: ProjectProfitability }) {
       <td className="px-2 py-2 text-slate-600">{row.primaryDriver}</td>
     </tr>
   );
+}
+
+function renderBoldTerms(text: string, terms: string[] = []) {
+  const validTerms = terms.filter(Boolean);
+  if (validTerms.length === 0) return text;
+
+  const pattern = new RegExp(`(${validTerms.map(escapeRegExp).join('|')})`, 'g');
+  return text.split(pattern).map((part, index) =>
+    validTerms.includes(part) ? (
+      <strong key={`${part}-${index}`} className="font-semibold text-slate-950">
+        {part}
+      </strong>
+    ) : (
+      part
+    ),
+  );
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function RankCard({

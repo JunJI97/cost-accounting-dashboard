@@ -24,10 +24,17 @@ import {
   CartesianGrid,
   Cell as RechartsCell,
   Legend,
+  Pie,
+  PieChart,
+  Label,
+  ReferenceLine,
   ResponsiveContainer,
+  Scatter,
+  ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
+  ZAxis,
 } from 'recharts';
 import { calculateProjectProfitability, simulateAdditionalStaff, summarize } from './domain/costing';
 import { currency, number, percent } from './domain/format';
@@ -72,13 +79,16 @@ function App() {
   const simulatedProject =
     simulatedRows.find((row) => row.projectId === simulation.projectId) ?? simulatedRows[0];
 
-  const chartRows = rows.slice(0, 8).map((row) => ({
-    name: row.projectName.replace(' 관리회계 고도화', ''),
-    내부인건비: Math.round(row.internalLaborCost / 1000000),
-    외주용역비: Math.round(row.outsourcingCost / 1000000),
-    직접경비: Math.round(row.directExpenseCost / 1000000),
-    공통비: Math.round(row.allocatedIndirectCost / 1000000),
-  }));
+  const chartRows = [...rows]
+    .sort((a, b) => b.totalCost - a.totalCost)
+    .slice(0, 8)
+    .map((row) => ({
+      name: row.projectName.replace(' 관리회계 고도화', ''),
+      내부인건비: Math.round(row.internalLaborCost / 1000000),
+      외주용역비: Math.round(row.outsourcingCost / 1000000),
+      직접경비: Math.round(row.directExpenseCost / 1000000),
+      공통비: Math.round(row.allocatedIndirectCost / 1000000),
+    }));
 
   return (
     <main className="min-h-screen bg-[#f6f7f9] text-slate-900">
@@ -125,8 +135,9 @@ function App() {
           <Metrics totals={totals} />
           <section className="mx-auto grid max-w-7xl gap-5 px-5 pb-6">
             <DashboardCommandCenter rows={rows} totals={totals} />
+            <DashboardVisuals rows={rows} />
             <ProjectProfitCard rows={rows} allocationBasis={allocationBasis} />
-            <ChartCard chartRows={chartRows} />
+            <CostCompositionChart chartRows={chartRows} />
           </section>
         </>
       )}
@@ -393,7 +404,202 @@ function ProjectProfitCard({
   );
 }
 
-function ChartCard({
+function DashboardVisuals({ rows }: { rows: ProjectProfitability[] }) {
+  const divisionRows = Object.values(
+    rows.reduce<
+      Record<
+        string,
+        {
+          divisionName: string;
+          revenue: number;
+          netProfit: number;
+          totalCost: number;
+        }
+      >
+    >((acc, row) => {
+      acc[row.divisionName] ??= {
+        divisionName: row.divisionName,
+        revenue: 0,
+        netProfit: 0,
+        totalCost: 0,
+      };
+      acc[row.divisionName].revenue += row.revenue;
+      acc[row.divisionName].netProfit += row.netProfit;
+      acc[row.divisionName].totalCost += row.totalCost;
+      return acc;
+    }, {}),
+  )
+    .map((division) => ({
+      ...division,
+      revenueMillion: Math.round(division.revenue / 1000000),
+      netProfitMillion: Math.round(division.netProfit / 1000000),
+      margin: ratio(division.netProfit, division.revenue) * 100,
+    }))
+    .sort((a, b) => b.revenue - a.revenue);
+
+  const riskRows = rows.map((row) => ({
+    name: row.projectName.replace(' 관리회계 고도화', ''),
+    margin: ratio(row.netProfit, row.revenue) * 100,
+    costRatio: ratio(row.totalCost, row.revenue) * 100,
+    revenue: Math.max(Math.round(row.revenue / 1000000), 1),
+    netProfit: row.netProfit,
+  }));
+  const totals = rows.reduce(
+    (acc, row) => {
+      acc.internalLaborCost += row.internalLaborCost;
+      acc.outsourcingCost += row.outsourcingCost;
+      acc.directExpenseCost += row.directExpenseCost;
+      acc.allocatedIndirectCost += row.allocatedIndirectCost;
+      return acc;
+    },
+    {
+      internalLaborCost: 0,
+      outsourcingCost: 0,
+      directExpenseCost: 0,
+      allocatedIndirectCost: 0,
+    },
+  );
+  const costMixRows = [
+    { name: '내부 인건비', value: totals.internalLaborCost, fill: '#5b8e7d' },
+    { name: '외주 용역비', value: totals.outsourcingCost, fill: '#8c7aa9' },
+    { name: '직접경비', value: totals.directExpenseCost, fill: '#6f8fbf' },
+    { name: '공통비', value: totals.allocatedIndirectCost, fill: '#c9a45c' },
+  ];
+  const totalCost = costMixRows.reduce((sum, row) => sum + row.value, 0);
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-base font-semibold text-slate-950">본부별 매출/순이익</h2>
+          <p className="text-sm text-slate-500">20개 프로젝트를 본부 단위로 압축해 수익 기여도를 비교합니다.</p>
+        </div>
+        <div className="mt-4 h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={divisionRows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey="divisionName" tick={{ fontSize: 12 }} interval={0} />
+              <YAxis tick={{ fontSize: 12 }} tickFormatter={(value) => `${number.format(Number(value))}백만`} />
+              <Tooltip
+                formatter={(value, name) => [`${number.format(Number(value))}백만원`, name === 'revenueMillion' ? '매출' : '순이익']}
+              />
+              <Legend />
+              <Bar dataKey="revenueMillion" name="매출" fill="#6f8fbf" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="netProfitMillion" name="순이익" fill="#5b8e7d" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-base font-semibold text-slate-950">전체 원가 구성</h2>
+          <p className="text-sm text-slate-500">내부 인건비, 외주비, 직접경비, 공통비 비중을 요약합니다.</p>
+        </div>
+        <div className="mt-4 h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Tooltip
+                formatter={(value, name) => [
+                  `${percent(ratio(Number(value), totalCost))} (${currency.format(Number(value))})`,
+                  name,
+                ]}
+              />
+              <Legend />
+              <Pie
+                data={costMixRows}
+                dataKey="value"
+                nameKey="name"
+                innerRadius={58}
+                outerRadius={94}
+                paddingAngle={2}
+                label={({ value }) => percent(ratio(Number(value), totalCost))}
+                labelLine={false}
+              >
+                {costMixRows.map((row) => (
+                  <RechartsCell key={row.name} fill={row.fill} />
+                ))}
+              </Pie>
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm xl:col-span-2">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-base font-semibold text-slate-950">원가율 vs 이익률</h2>
+          <p className="text-sm text-slate-500">오른쪽 아래일수록 원가율은 높고 이익률은 낮아 우선 점검 대상입니다.</p>
+        </div>
+        <div className="mt-4 h-80">
+          <ResponsiveContainer width="100%" height="100%">
+            <ScatterChart margin={{ top: 12, right: 20, left: 18, bottom: 24 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis
+                dataKey="costRatio"
+                name="원가율"
+                tick={{ fontSize: 12 }}
+                tickFormatter={(value) => `${number.format(Number(value))}%`}
+                type="number"
+              >
+                <Label value="원가율 (%)" offset={-12} position="insideBottom" />
+              </XAxis>
+              <YAxis
+                dataKey="margin"
+                name="이익률"
+                tick={{ fontSize: 12 }}
+                tickFormatter={(value) => `${number.format(Number(value))}%`}
+                type="number"
+              >
+                <Label
+                  value="이익률 (%)"
+                  angle={-90}
+                  offset={6}
+                  position="insideLeft"
+                  style={{ textAnchor: 'middle' }}
+                />
+              </YAxis>
+              <ZAxis dataKey="revenue" range={[70, 340]} />
+              <Tooltip content={<RiskMatrixTooltip />} cursor={{ strokeDasharray: '3 3' }} />
+              <ReferenceLine x={90} stroke="#cbd5e1" strokeDasharray="4 4" />
+              <ReferenceLine y={10} stroke="#cbd5e1" strokeDasharray="4 4" />
+              <Scatter data={riskRows}>
+                {riskRows.map((row) => (
+                  <RechartsCell
+                    key={row.name}
+                    fill={row.costRatio > 90 && row.margin < 10 ? '#c66a5a' : row.margin < 10 ? '#c9a45c' : '#6f8fbf'}
+                  />
+                ))}
+              </Scatter>
+            </ScatterChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RiskMatrixTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload: { name: string; margin: number; costRatio: number; revenue: number; netProfit: number } }>;
+}) {
+  if (!active || !payload?.length) return null;
+  const row = payload[0].payload;
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs shadow-sm">
+      <p className="font-semibold text-slate-900">{row.name}</p>
+      <p className="mt-1 text-slate-600">이익률 {number.format(row.margin)}%</p>
+      <p className="text-slate-600">원가율 {number.format(row.costRatio)}%</p>
+      <p className="text-slate-600">매출 {number.format(row.revenue)}백만원</p>
+      <p className="text-slate-600">순이익 {currency.format(row.netProfit)}</p>
+    </div>
+  );
+}
+
+function CostCompositionChart({
   chartRows,
 }: {
   chartRows: Array<{
