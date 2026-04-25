@@ -1,12 +1,8 @@
-import { Download, FileJson, FileSpreadsheet, Upload } from 'lucide-react';
+import { Download, FileSpreadsheet, Upload } from 'lucide-react';
 import { useRef, useState } from 'react';
 import type { SheetData } from 'write-excel-file/universal';
 import {
-  downloadCsv,
-  downloadJson,
   getCsvFiles,
-  parseDatasetCsv,
-  parseDatasetJson,
   type ExportFileDefinition,
 } from '../domain/csvExchange';
 import {
@@ -19,38 +15,52 @@ import { useCostingStore } from '../store/useCostingStore';
 
 export function CsvExchangePanel({ dataset }: { dataset: CostDataset }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [message, setMessage] = useState('엑셀 템플릿 또는 CSV/JSON 파일을 가져올 수 있습니다.');
+  const [message, setMessage] = useState('통합 엑셀 템플릿으로 전체 데이터를 가져오거나 내보낼 수 있습니다.');
+  const [importFeedback, setImportFeedback] = useState<{
+    tone: 'success' | 'error' | 'info';
+    title: string;
+    body: string;
+  } | null>(null);
   const [importResult, setImportResult] = useState<UserImportResult | null>(null);
-  const [exportFormat, setExportFormat] = useState<'xlsx' | 'csv' | 'json'>('xlsx');
   const [exportTarget, setExportTarget] = useState<'all' | ExportFileDefinition['key']>('all');
   const [isExporting, setIsExporting] = useState(false);
-  const { setDataset, updateDatasetPart } = useCostingStore();
+  const { setDataset } = useCostingStore();
 
   async function handleImport(file: File) {
     try {
-      if (/\.(xlsx|xls)$/i.test(file.name)) {
-        const result = await parseUserImportWorkbook(file);
-        setImportResult(result);
-        setMessage(
-          result.issues.some((issue) => issue.severity === 'error')
-            ? `${file.name} 파일에 수정이 필요한 오류가 있습니다.`
-            : `${file.name} 파일을 검토했습니다. 반영할 수 있습니다.`,
-        );
-        return;
+      setImportFeedback({
+        tone: 'info',
+        title: '가져오기 확인 중',
+        body: `${file.name} 파일을 읽고 있습니다.`,
+      });
+      setImportResult(null);
+      if (!/\.(xlsx|xls)$/i.test(file.name)) {
+        throw new Error('엑셀 파일만 가져올 수 있습니다. 통합 엑셀 템플릿(.xlsx)을 사용하세요.');
       }
 
-      const text = await file.text();
-      if (file.name.toLowerCase().endsWith('.json')) {
-        setDataset(parseDatasetJson(text));
-        setMessage(`${file.name} 전체 데이터셋을 가져왔습니다.`);
-        return;
-      }
-
-      const result = parseDatasetCsv(text, dataset);
-      updateDatasetPart(result.key, result.rows);
-      setMessage(`${file.name} 파일을 ${getLabel(result.key)} 데이터로 반영했습니다.`);
+      const result = await parseUserImportWorkbook(file);
+      setImportResult(result);
+      const hasErrors = result.issues.some((issue) => issue.severity === 'error');
+      setMessage(
+        hasErrors
+          ? `${file.name} 파일에 수정이 필요한 오류가 있습니다.`
+          : `${file.name} 파일을 검토했습니다. 반영할 수 있습니다.`,
+      );
+      setImportFeedback({
+        tone: hasErrors ? 'error' : 'success',
+        title: hasErrors ? '엑셀 검토 오류' : '엑셀 검토 완료',
+        body: hasErrors
+          ? '아래 검토 창의 오류를 수정한 뒤 다시 업로드하세요.'
+          : '검토 창에서 요약을 확인한 뒤 반영할 수 있습니다.',
+      });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '파일을 가져오지 못했습니다.');
+      const body = error instanceof Error ? error.message : '파일을 가져오지 못했습니다.';
+      setMessage(body);
+      setImportFeedback({
+        tone: 'error',
+        title: '가져오기 실패',
+        body,
+      });
     }
   }
 
@@ -63,35 +73,15 @@ export function CsvExchangePanel({ dataset }: { dataset: CostDataset }) {
   async function handleExport() {
     setIsExporting(true);
     try {
-      if (exportFormat === 'json') {
-        downloadJson(dataset);
-        setMessage('전체 데이터셋을 JSON으로 내보냈습니다.');
-        return;
-      }
-
       if (exportTarget === 'all') {
-        if (exportFormat === 'xlsx') {
-          await downloadDatasetExcel(dataset, exportFiles);
-          setMessage('전체 데이터셋을 엑셀 파일로 내보냈습니다.');
-          return;
-        }
-
-        for (const file of exportFiles) {
-          downloadCsv(dataset, file.key);
-        }
-        setMessage('전체 데이터셋을 CSV 파일 여러 개로 내보냈습니다.');
+        await downloadDatasetExcel(dataset, exportFiles);
+        setMessage('전체 데이터셋을 엑셀 파일로 내보냈습니다.');
         return;
       }
 
-      if (exportFormat === 'xlsx') {
-        const target = exportFiles.find((file) => file.key === exportTarget);
-        await downloadDatasetExcel(dataset, target ? [target] : exportFiles);
-        setMessage(`${target?.label ?? '선택 데이터'} 데이터를 엑셀로 내보냈습니다.`);
-        return;
-      }
-
-      downloadCsv(dataset, exportTarget);
-      setMessage(`${getLabel(exportTarget)} 데이터를 CSV로 내보냈습니다.`);
+      const target = exportFiles.find((file) => file.key === exportTarget);
+      await downloadDatasetExcel(dataset, target ? [target] : exportFiles);
+      setMessage(`${target?.label ?? '선택 데이터'} 데이터를 엑셀로 내보냈습니다.`);
     } finally {
       setIsExporting(false);
     }
@@ -101,7 +91,7 @@ export function CsvExchangePanel({ dataset }: { dataset: CostDataset }) {
     <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <p className="text-sm font-semibold text-slate-900">데이터 가져오기 / 내보내기</p>
+          <p className="text-sm font-semibold text-slate-900">엑셀 가져오기 / 내보내기</p>
           <p className="mt-1 text-sm text-slate-500">{message}</p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -126,29 +116,10 @@ export function CsvExchangePanel({ dataset }: { dataset: CostDataset }) {
       <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
           <label className="block">
-            <span className="text-xs font-semibold text-slate-500">내보내기 형식</span>
-            <select
-              className="mt-1 h-9 min-w-[130px] rounded-md border border-slate-300 bg-white px-2 text-sm"
-              value={exportFormat}
-              onChange={(event) => {
-                const value = event.target.value as typeof exportFormat;
-                setExportFormat(value);
-                if (value === 'json') {
-                  setExportTarget('all');
-                }
-              }}
-            >
-              <option value="xlsx">엑셀</option>
-              <option value="csv">CSV</option>
-              <option value="json">JSON</option>
-            </select>
-          </label>
-          <label className="block">
-            <span className="text-xs font-semibold text-slate-500">내보내기 대상</span>
+            <span className="text-xs font-semibold text-slate-500">엑셀 내보내기 대상</span>
             <select
               className="mt-1 h-9 min-w-[190px] rounded-md border border-slate-300 bg-white px-2 text-sm"
               value={exportTarget}
-              disabled={exportFormat === 'json'}
               onChange={(event) => setExportTarget(event.target.value as typeof exportTarget)}
             >
               <option value="all">전체 데이터셋</option>
@@ -165,7 +136,7 @@ export function CsvExchangePanel({ dataset }: { dataset: CostDataset }) {
             disabled={isExporting}
             className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100"
           >
-            {exportFormat === 'json' ? <FileJson size={15} aria-hidden="true" /> : <Download size={15} aria-hidden="true" />}
+            <Download size={15} aria-hidden="true" />
             {isExporting ? '내보내는 중' : '내보내기'}
           </button>
         </div>
@@ -173,7 +144,7 @@ export function CsvExchangePanel({ dataset }: { dataset: CostDataset }) {
       <div className="mt-3 grid gap-2 text-sm text-slate-600 lg:grid-cols-3">
         <ImportGuide
           title="1. 템플릿 작성"
-          body="엑셀 템플릿을 내려받아 사번, 프로젝트코드, 본부명 기준으로 작성합니다."
+          body="통합 엑셀 템플릿을 내려받아 사번, 프로젝트코드, 본부명 기준으로 작성합니다."
         />
         <ImportGuide
           title="2. 업로드 검토"
@@ -181,18 +152,43 @@ export function CsvExchangePanel({ dataset }: { dataset: CostDataset }) {
         />
         <ImportGuide
           title="3. 전체 교체"
-          body="오류가 없으면 업로드 파일 기준으로 데이터를 교체하고 모든 화면을 재계산합니다."
+          body="엑셀 검토에 오류가 없으면 업로드 파일 기준으로 데이터를 교체하고 모든 화면을 재계산합니다."
         />
       </div>
       <div className="mt-3 rounded-md bg-white px-3 py-2 text-sm leading-6 text-slate-600">
         <b className="text-slate-900">작성 규칙:</b> 판관비는 프로젝트코드를 비우고, 직접경비/외주비는
         프로젝트코드를 입력합니다. 일일 근무 기록은 사번과 프로젝트코드가 마스터 시트에 먼저 존재해야 합니다.
       </div>
+      {importFeedback && (
+        <div
+          className={`mt-3 rounded-md border px-3 py-3 text-sm ${
+            importFeedback.tone === 'success'
+              ? 'border-teal-200 bg-teal-50 text-teal-800'
+              : importFeedback.tone === 'error'
+                ? 'border-red-200 bg-red-50 text-red-800'
+                : 'border-slate-200 bg-white text-slate-700'
+          }`}
+        >
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="font-semibold">{importFeedback.title}</p>
+              <p className="mt-1 leading-6">{importFeedback.body}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setImportFeedback(null)}
+              className="h-8 shrink-0 rounded-md border border-current px-2 text-xs font-medium opacity-80 hover:opacity-100"
+            >
+              닫기
+            </button>
+          </div>
+        </div>
+      )}
       <input
         ref={fileInputRef}
         className="hidden"
         type="file"
-        accept=".xlsx,.xls,.csv,.json,text/csv,application/json"
+        accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
         onChange={(event) => {
           const file = event.target.files?.[0];
           if (file) void handleImport(file);
@@ -323,6 +319,11 @@ export function CsvExchangePanel({ dataset }: { dataset: CostDataset }) {
                   if (!importResult) return;
                   setDataset(importResult.dataset);
                   setMessage('엑셀 데이터를 반영했습니다. 대시보드와 리포트에서 재계산 결과를 확인하세요.');
+                  setImportFeedback({
+                    tone: 'success',
+                    title: '엑셀 가져오기 완료',
+                    body: '전체 데이터를 교체했고 대시보드와 리포트 계산에 반영했습니다.',
+                  });
                   setImportResult(null);
                 }}
                 className="h-9 rounded-md bg-teal-700 px-4 text-sm font-medium text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300"
@@ -353,10 +354,6 @@ function ImportSummary({ label, value }: { label: string; value: number }) {
       <p className="mt-1 text-base font-semibold text-slate-950">{value.toLocaleString('ko-KR')}</p>
     </div>
   );
-}
-
-function getLabel(key: keyof CostDataset) {
-  return getCsvFiles().find((file) => file.key === key)?.label ?? key;
 }
 
 async function downloadDatasetExcel(dataset: CostDataset, files: ExportFileDefinition[]) {

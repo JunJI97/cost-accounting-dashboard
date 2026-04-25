@@ -30,6 +30,48 @@ describe('csv exchange', () => {
     });
   });
 
+  it('accepts Korean timesheet csv and maps business keys', () => {
+    const result = parseDatasetCsv('일자,사번,프로젝트코드,근무시간\n2026-04-01,E-1001,PRJ-001,8', seedData);
+
+    expect(result.key).toBe('timeEntries');
+    expect(result.rows[0]).toMatchObject({
+      date: '2026-04-01',
+      employeeId: 'emp-1',
+      projectId: 'prj-1',
+      hours: 8,
+    });
+  });
+
+  it('accepts Korean project csv and comma formatted amounts', () => {
+    const result = parseDatasetCsv(
+      '프로젝트코드,프로젝트명,본부명,계약금액,시작일,종료일\nPRJ-X,테스트 프로젝트,전략기획본부,"120,000,000",2026-01-01,2026-06-30',
+      seedData,
+    );
+
+    expect(result.key).toBe('projects');
+    expect(result.rows[0]).toMatchObject({
+      id: 'PRJ-X',
+      projectCode: 'PRJ-X',
+      divisionId: 'div-1',
+      revenue: 120000000,
+    });
+  });
+
+  it('creates related divisions when Korean project csv has new division names', () => {
+    const result = parseDatasetCsv(
+      '프로젝트코드,프로젝트명,본부명,계약금액\nPRJ-X,테스트 프로젝트,1번 본부,5000000',
+      seedData,
+    );
+
+    expect(result.key).toBe('projects');
+    expect(result.relatedRows?.divisions).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: '1번 본부' })]),
+    );
+    expect(result.rows[0]).toMatchObject({
+      divisionId: 'div-csv-1번-본부',
+    });
+  });
+
   it('detects project assignment csv', () => {
     const result = parseDatasetCsv(
       'id,employeeId,projectId,startDate,endDate\npa-1,emp-1,prj-1,2026-01-01,2026-06-30',

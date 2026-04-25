@@ -1,6 +1,7 @@
 import readExcelFile from 'read-excel-file/universal';
 import writeExcelFile from 'write-excel-file/universal';
 import type { SheetData } from 'write-excel-file/universal';
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import type { CostDataset, ExpenseLedger, ExpenseType } from './types';
 
 export type ImportSeverity = 'error' | 'warning';
@@ -35,6 +36,14 @@ const SHEETS = {
   timesheets: '일일 근무 기록',
   expenses: '비용 원장',
 } as const;
+
+const SHEET_ALIASES: Record<string, string[]> = {
+  [SHEETS.employees]: ['Employee_Master'],
+  [SHEETS.projects]: ['Project_Master'],
+  [SHEETS.assignments]: ['Project_Assignment'],
+  [SHEETS.timesheets]: ['Daily_Timesheet'],
+  [SHEETS.expenses]: ['Expense_Ledger'],
+};
 
 const EXPENSE_TYPES: ExpenseType[] = ['직접경비', '외주비', '판관비'];
 
@@ -180,7 +189,7 @@ export async function downloadUserImportTemplate() {
 }
 
 export async function parseUserImportWorkbook(file: Blob | ArrayBuffer): Promise<UserImportResult> {
-  const workbook = await readExcelFile(file, { trim: true });
+  const workbook = await readWorkbookSafely(file);
   const issues: ImportIssue[] = [];
   const employeeRows = readSheet(workbook, SHEETS.employees, issues);
   const projectRows = readSheet(workbook, SHEETS.projects, issues);
@@ -408,10 +417,45 @@ export async function parseUserImportWorkbook(file: Blob | ArrayBuffer): Promise
   };
 }
 
+async function readWorkbookSafely(file: Blob | ArrayBuffer) {
+  try {
+    return await readExcelFile(file, { trim: true });
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('inline string')) {
+      throw error;
+    }
+    return readExcelFile(await sanitizeInlineStringCells(file), { trim: true });
+  }
+}
+
+async function sanitizeInlineStringCells(file: Blob | ArrayBuffer) {
+  const arrayBuffer = file instanceof Blob ? await file.arrayBuffer() : file;
+  const files = unzipSync(new Uint8Array(arrayBuffer));
+
+  for (const [path, content] of Object.entries(files)) {
+    if (!path.startsWith('xl/worksheets/') || !path.endsWith('.xml')) continue;
+    const xml = strFromU8(content);
+    const sanitized = xml.replace(/<c([^>]*)\st="inlineStr"([^>]*)><\/c>/g, '<c$1$2></c>');
+    if (sanitized !== xml) {
+      files[path] = strToU8(sanitized);
+    }
+  }
+
+  return zipSync(files).buffer;
+}
+
 function readSheet(workbook: Awaited<ReturnType<typeof readExcelFile>>, sheetName: string, issues: ImportIssue[]) {
-  const sheet = workbook.find((item) => item.sheet === sheetName);
+  const allowedNames = [sheetName, ...(SHEET_ALIASES[sheetName] ?? [])];
+  const sheet = workbook.find((item) => allowedNames.includes(item.sheet));
   if (!sheet) {
-    addIssue(issues, 'error', sheetName, 1, '시트', `'${sheetName}' 시트가 없습니다.`);
+    addIssue(
+      issues,
+      'error',
+      sheetName,
+      1,
+      '시트',
+      `'${sheetName}' 시트가 없습니다. 허용 시트명: ${allowedNames.join(', ')}`,
+    );
     return [];
   }
 

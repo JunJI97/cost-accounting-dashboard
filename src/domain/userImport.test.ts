@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import writeExcelFile from 'write-excel-file/node';
 import type { SheetData } from 'write-excel-file/node';
 import { parseUserImportWorkbook } from './userImport';
@@ -25,9 +26,34 @@ describe('user workbook import', () => {
 
     expect(result.issues.some((issue) => issue.severity === 'error' && issue.column === '사번')).toBe(true);
   });
+
+  it('recovers from empty inline string cells in edited templates', async () => {
+    const workbook = await createWorkbookBuffer();
+    const corrupted = injectEmptyInlineStringCell(workbook);
+    const result = await parseUserImportWorkbook(corrupted);
+
+    expect(result.issues.filter((issue) => issue.severity === 'error')).toHaveLength(0);
+    expect(result.dataset.projects[0].projectCode).toBe('PRJ-001');
+  });
+
+  it('accepts database-style sheet names', async () => {
+    const result = await parseUserImportWorkbook(await createWorkbookBuffer({}, {
+      '인력 마스터': 'Employee_Master',
+      '프로젝트 마스터': 'Project_Master',
+      '프로젝트 투입': 'Project_Assignment',
+      '일일 근무 기록': 'Daily_Timesheet',
+      '비용 원장': 'Expense_Ledger',
+    }));
+
+    expect(result.issues.filter((issue) => issue.severity === 'error')).toHaveLength(0);
+    expect(result.dataset.projects[0].projectCode).toBe('PRJ-001');
+  });
 });
 
-async function createWorkbookBuffer(overrides: Partial<Record<string, Array<Record<string, string | number>>>> = {}) {
+async function createWorkbookBuffer(
+  overrides: Partial<Record<string, Array<Record<string, string | number>>>> = {},
+  sheetRenames: Record<string, string> = {},
+) {
   const baseSheets = {
     '인력 마스터': [
       {
@@ -85,7 +111,7 @@ async function createWorkbookBuffer(overrides: Partial<Record<string, Array<Reco
   };
 
   const workbookSheets = Object.entries(finalSheets).map(([sheet, rows]) => ({
-    sheet,
+    sheet: sheetRenames[sheet] ?? sheet,
     data: toSheetData(rows as Array<Record<string, string | number>>),
   }));
 
@@ -99,4 +125,12 @@ function toSheetData(rows: Array<Record<string, string | number>>): SheetData {
     headers,
     ...rows.map((row) => headers.map((header) => row[header] ?? '')),
   ];
+}
+
+function injectEmptyInlineStringCell(arrayBuffer: ArrayBuffer) {
+  const files = unzipSync(new Uint8Array(arrayBuffer));
+  const sheetPath = 'xl/worksheets/sheet1.xml';
+  const xml = strFromU8(files[sheetPath]);
+  files[sheetPath] = strToU8(xml.replace('</sheetData>', '<row r="99"><c r="B99" t="inlineStr"></c></row></sheetData>'));
+  return zipSync(files).buffer;
 }

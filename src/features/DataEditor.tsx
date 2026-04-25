@@ -29,7 +29,7 @@ const dataTabs: Array<{ id: DataTab; label: string; description: string }> = [
   { id: 'projects', label: '프로젝트', description: '인력별 프로젝트 투입기간' },
   { id: 'daily', label: 'Daily Report', description: '일자별 투입시간' },
   { id: 'costs', label: '직접비/공통비', description: '비용 원장 관리' },
-  { id: 'exchange', label: 'CSV/JSON', description: '가져오기/내보내기' },
+  { id: 'exchange', label: '엑셀 연동', description: '통합 엑셀 가져오기/내보내기' },
 ];
 
 export function DataEditor({ dataset }: DataEditorProps) {
